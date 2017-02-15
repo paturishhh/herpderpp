@@ -1,7 +1,3 @@
-//1pm demooooooooooo monday
-//state diagram T__T
-//t915 1245
-// working on startup module... yessir
 /*Uhm hi, you start counting at 0, okay, just for the gateway settings*/
 /*Programmed for Gizduino IOT-644*/
 #include <SoftwareSerial.h>
@@ -264,7 +260,6 @@ void loop(){
         }
       }
       else if(segmentCounter == 0x0B){ //COMMAND PARAMETER FOR API == 3
-        configSentPartCtr = serialData;
         if (serialData == 0x00){ // Request keep alive message
           commandValue = 0x01; // sets lsb to indicate request keep alive is there
           strcpy_P(buffer, (char*)pgm_read_word(&(messages[14])));
@@ -419,6 +414,7 @@ void loop(){
         portNum = 00; 
         if((apiCount == 0x03 && configSentPartCtr==0x03) || apiCount != 0x03 ){ //all other apis except if api is 3, then ctr has to be 3
           writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
+          Serial.println("Writing to file");
         } 
 //        printRegisters(); // prints all to double check
      }
