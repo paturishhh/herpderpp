@@ -86,10 +86,6 @@ long portOverflowCounts [(int) PORT_COUNT]; //stores the overflow counters to be
 String serialBuffer[10]; // stores the buffer at serial
 
 void setup(){
-  // to initiate serial communication
-  Serial.begin(9600);
-  timeCtr = 0;
-
   //test pins for timer
   pinMode(4, OUTPUT);
   pinMode(5, OUTPUT);
@@ -97,6 +93,10 @@ void setup(){
   pinMode(7, OUTPUT);
   pinMode(CS_PIN, OUTPUT); 
   digitalWrite(CS_PIN, HIGH);
+
+   // to initiate serial communication
+  Serial.begin(9600);
+  timeCtr = 0;
 
 // NOTE: AVOID PUTTING STUFF ON PIN 0 & 1 coz that is where serial is (programming, debugging)
   for (byte c=0x00; c<0x0C; c++){
@@ -119,9 +119,6 @@ void setup(){
   
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink node
 //  printRegisters();
-  calculateOverflow();
-  initializeTimer();
-  
  }
 
 void loop(){
@@ -620,7 +617,9 @@ void loadConfig(){ //loads config file and applies it to the registers
           }
          }
     }
-    configFile.close();
+      configFile.close();
+      initializeTimer();
+      calculateOverflow();
     }
     else{
       strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
@@ -987,7 +986,6 @@ void calculateOverflow(){
     overflowCount  = totalTicks;
   }
   else{
-    //may iba diyan may delay ng 1 overflow ^^
     overflowCount = totalTicks/pow(2, 8); //8 coz timer 2 has 8 bits
   }
  
@@ -1017,6 +1015,7 @@ long bcd2dec(unsigned int nTime){
 ISR(TIMER2_OVF_vect){
   timeCtr++;
   Serial.println(timeCtr);
+//  Serial.println(timeCtr);
   if((timeCtr%305) == 0){ //5sec
     Serial.println("Five seconds");
     digitalWrite(4, digitalRead(4) ^ 1);
@@ -1025,33 +1024,24 @@ ISR(TIMER2_OVF_vect){
     Serial.println("1hr");
     digitalWrite(5, digitalRead(5)^1);
   }
-  if((timeCtr%36621) == 0){ //10mins
-    Serial.println("10mins");
+  if((timeCtr%61) == 0){ //1 sec
+    Serial.println("1 sec");
     digitalWrite(6, digitalRead(6)^1);
   }
-  if((timeCtr%61) == 0){ //1second
+  if((timeCtr%30) == 0){ //0.5s
     Serial.println("0.5sec");
     digitalWrite(7, digitalRead(7)^1);
   }
 }
 
 void initializeTimer(){
-  // I think this is what you need ^^v
+  //setting it up to normal mode
+  // one OVF = 16ms ( 256 / (16MHZ/1024))
   cli(); //disable global interrupts
 
-  GTCCR = (1 << TSM) | (1<<PSRASY)| (1<<PSRSYNC); //halt all timer to setup
-  TCCR2A |= (1 << WGM21) ; 
-//  OCRA controls the MAX COUNTER VALUE
-  TCCR2B = (1 << CS22) | (1 << CS21) | (1 << CS20); // set prescaler to 1024
-  TIMSK2 = (1 << OCIE2B) | (1 << OCIE2A) | (1 << TOIE2); //enable interrupt to OCR2A and B (certain ticks) and overflow
-  TIFR2 = (1 << OCF2B) | (1 << OCF2A) | (1 << TOV2); //interrupt flag registers
-  OCR2A = 0xFF; //timer 2 top; do not change
-  OCR2B  = 0xFF; //compare match
-  TCNT2 = 1; //offset timer coz OCR2A is TOP
-  GTCCR = 0; // restart timer
-  sei(); //enable global interrupts   
-//  Serial.println("Init done"); 
-//  tcnt2 = counter mismo // can be read and write
-//  OCF2A = enable to allow interrupt 
-  //can be modified to change the TOP (in counter)
+  TCCR2A = 0 ; 
+  TCCR2B = 0 ; 
+  TCCR2B |= (1 << CS22) | (1 << CS21) | (1 << CS20); // set prescaler to 1024
+  TIMSK2 |= (1 << TOIE2); //enable interrupt to overflow
+  sei(); //enable global interrupts  
 }
