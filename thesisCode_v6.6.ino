@@ -7,7 +7,6 @@
 #include <avr/interrupt.h>
 #include <math.h>
 
-
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
@@ -82,24 +81,29 @@ byte partCounter = 0x00; //part of the data counter when receiving configs
 //byte actuatorPort = 0x00; //actuator port for event triggered
 byte commandValue = 0x00; // for api = 3, contains the command value
 byte checker = 0x00; // for api = 2 checker for threshold/range mode; api = 3 counter for receive
-volatile unsigned long timeCtr = 0; // counter for overflows
+volatile unsigned long timeCtr; // counter for overflows
 long portOverflowCounts [(int) PORT_COUNT]; //stores the overflow counters to be checked by interrupt
+String serialBuffer[10]; // stores the buffer at serial
 
 void setup(){
   // to initiate serial communication
   Serial.begin(9600);
+  timeCtr = 0;
+
+  //test pins for timer
+  pinMode(4, OUTPUT);
+  pinMode(5, OUTPUT);
+  pinMode(6, OUTPUT);
+  pinMode(7, OUTPUT);
+  pinMode(CS_PIN, OUTPUT); 
+  digitalWrite(CS_PIN, HIGH);
 
 // NOTE: AVOID PUTTING STUFF ON PIN 0 & 1 coz that is where serial is (programming, debugging)
   for (byte c=0x00; c<0x0C; c++){
     setPortConfigSegmentInit(c, 0); // set the port to input
 //    Serial.print("Port Config Segment at Start: ");
 //    Serial.println(getPortConfigSegment(c), HEX);
-  } 
-  DDRD = DDRD | B00000000; // (digital) all bits input OR-ed because (0-1) tx and rx
-  DDRC = DDRC | B000000; // (analog) all bits intput OR-ed (6) reset
-
-  pinMode(CS_PIN, OUTPUT); 
-  digitalWrite(CS_PIN, HIGH);
+  }
   
   //sets values of the arrays to 0, needed else it would not print anything
   memset(actuatorValueOnDemandSegment,0,sizeof(actuatorValueOnDemandSegment)); 
@@ -114,9 +118,10 @@ void setup(){
 //  }
   
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink node
-  printRegisters();
-//  initializeTimer();
-//  calculateOverflow();
+//  printRegisters();
+  calculateOverflow();
+  initializeTimer();
+  
  }
 
 void loop(){
@@ -616,7 +621,6 @@ void loadConfig(){ //loads config file and applies it to the registers
          }
     }
     configFile.close();
-    Serial.println("Loading finished");
     }
     else{
       strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
@@ -799,79 +803,6 @@ void checkOtherCommands(){ // checks if there is still commands
     Serial.println(buffer);
   }
 }
-
-void checkAllPortMode(){ //POSTPONED KASI NALILITO AKO KUNG TIME BASED BA MUNA DAPAT KASI SA PINS
-  //TEST: digital ports from output to all input then some pins to output then input again
-  Serial.println("@ Check All Port Mode");
-  //check each port (via DDR) vs port config (portNum) bit 3 if same
-    // if not,  OR that bit to temp placeholder
-    // OR to ddr
-   //if (port 6-B) then it is analog, ignore
-  for(byte c=0x00; c<0x0C; c++){
-    byte j = portConfigSegment[c];
-    
-    if(c<0x05){ //from ports 0-4 (digital)
-      Serial.println("--- Digital port: ---");
-      byte portConfigTemp = bitRead(j, 3); //bit 3 of port config
-      byte registerTemp =  bitRead(DDRD, c+0x03); // value of register
-      byte temp = registerTemp ^ portConfigTemp; //compare if same
-      //DDRD + 0X04 coz you use pin 4 to 9 (if equal to 0, same)
-      
-      Serial.print("Pin Reading: ");
-      Serial.println(c+0x03);
-      Serial.print("DDRD VALUE:");
-      Serial.println(registerTemp);
-      Serial.print("PORT CONFIG VALUE: ");
-      Serial.println(portConfigTemp);
-      Serial.print("XOR VALUE: ");
-      Serial.println(temp);
-      Serial.print("PORT NUMBER: ");
-      Serial.println(c);
-      
-      if (temp != 0x00){  // if not same
-        if(registerTemp == 0x00 && portConfigTemp == 0x01){ //setting registertemp
-          Serial.println("Setting registerTemp");
-          byte d = B00000001 << c+0x03; // to set that value
-          Serial.println(d,BIN);
-          DDRD = DDRD | d;
-          Serial.println(DDRD,BIN);
-          
-        }
-        //if from 0 to 1
-        //if from 1 to 0
-        Serial.print("New Value: ");
-        Serial.println(bitRead(DDRD, c+0x03));
-      }
-    }
-    else if(c== 0x05){ //accesses PORT B coz PIN 9 is there
-      
-    }
-    else if(c>=0x06){ //from ports 6-B (analog)
-      Serial.println("--- Analog port --- ");
-      byte temp = bitRead(DDRC, c-0x06) ^ bitRead(j, 3); //get bit 3 of each port
-      //DDRC - 0X06 coz pin 0 -5 of ANALOG
-      //analog is needed to be set daw para pag nag analog read as digital pin
-
-      Serial.print("Pin Reading: ");
-      Serial.println(c-0x06);
-      Serial.print("DDRC VALUE: ");
-      Serial.println(bitRead(DDRC, c-0x06));
-      Serial.print("PORT CONFIG VALUE: ");
-      Serial.println(bitRead(j, 3));
-      Serial.print("XOR VALUE: ");
-      Serial.println(temp);
-      Serial.print("PORT NUMBER: ");
-      Serial.println(c);
-      
-      if (temp != 0x00){ 
-        bitWrite(DDRC, c-0x06, bitRead(j,3)); // make same as getPortConfig
-        Serial.print("New Value: ");
-        Serial.println(bitRead(DDRC, c-0x06));
-      }
-    }
-  }
-  
-}
 /************ Setters  *************/
 //USE CAUTION WHEN USING THIS.. I THINK TAMA NA NAMAN GINAGAWA NIYA
 void setEventNotif(int val){
@@ -1008,4 +939,119 @@ void setActuatorValueOnDemandSegment(byte portNum, int val){
   }
 }
 
+void calculateOverflow(){
+   //if set yung timerRegister (set when may timeBased)
+  //do this to timeSegment[bit that was set]
+  //stop timer ah
+  
+  //convert time to seconds store to realTime
+  unsigned int tempTime = 0x1100; //sample data ; 1.5hrs
+  byte timeUnit = tempTime >> 12; // checks which unit 
+  unsigned int timeKeeper = tempTime & ((1 << 12)-1); // get time only masking it
+  //convert bcd to dec
+  long timeTemp = bcd2dec(timeKeeper); //number in seconds
+  long realTime = 0x00; //32 bits ; max is 24hrs 86400 seconds
+  float timeMS = 0.000;
 
+  //CONVERTS TO SECONDS
+  if(timeUnit == 0x01 ){//ms 
+    timeMS = timeTemp / 1000.0;
+    Serial.println(timeMS,3); //0.99
+  }
+  else if(timeUnit == 0x02){//sec
+    //it is as is
+  }
+  else if(timeUnit == 0x04){//min    
+    timeTemp = timeTemp * 60;
+  }
+  else if(timeUnit == 0x08){//hour
+    timeTemp = timeTemp * 3600;
+  }
+  
+  realTime = timeTemp;
+  Serial.println(realTime);
+
+  //GETTING THE OVERFLOW VALUE IF TIME >=17ms ELSE overflowValue = tickValue
+  //9-16ms = 0 overflow - need realTime = totalTicks;
+  //well, up to 100ms lang siya sooo I'll just leave it here
+  int frequency = 15625; // clock frequency / prescaler
+  long totalTicks;
+  if(timeUnit == 0x01){ //if ms; because it is float
+    totalTicks = timeMS * frequency;
+  }
+  else{
+    totalTicks = realTime * frequency;
+  }
+  long overflowCount;
+  if(timeTemp <=16 && timeUnit == 0x01){ //if less than 16ms kasi hindi mag overflow
+    overflowCount  = totalTicks;
+  }
+  else{
+    //may iba diyan may delay ng 1 overflow ^^
+    overflowCount = totalTicks/pow(2, 8); //8 coz timer 2 has 8 bits
+  }
+ 
+  Serial.print("OFC: ");
+  Serial.println(overflowCount);
+
+  
+  //check overflowCount if reached @ INTERRUPT
+  
+}
+
+long bcd2dec(unsigned int nTime){
+//  byte x;
+  long temp = 0;
+  //999
+  temp = ((nTime>>8)%16);
+//  nTime = nTime << 8;
+//  Serial.println(temp);
+  temp *= 10;
+//  Serial.println(temp);
+  temp += ((nTime>>4)%16);
+  temp *= 10;
+  temp += (nTime %16);
+  return temp;
+}
+
+ISR(TIMER2_OVF_vect){
+  timeCtr++;
+  Serial.println(timeCtr);
+  if((timeCtr%305) == 0){ //5sec
+    Serial.println("Five seconds");
+    digitalWrite(4, digitalRead(4) ^ 1);
+  }
+  if((timeCtr%219726) == 0){ //1hr
+    Serial.println("1hr");
+    digitalWrite(5, digitalRead(5)^1);
+  }
+  if((timeCtr%36621) == 0){ //10mins
+    Serial.println("10mins");
+    digitalWrite(6, digitalRead(6)^1);
+  }
+  if((timeCtr%61) == 0){ //1second
+    Serial.println("0.5sec");
+    digitalWrite(7, digitalRead(7)^1);
+  }
+}
+
+void initializeTimer(){
+  // I think this is what you need ^^v
+  cli(); //disable global interrupts
+
+  GTCCR = (1 << TSM) | (1<<PSRASY)| (1<<PSRSYNC); //halt all timer to setup
+  TCCR2A |= (1 << WGM21) ; 
+//  OCRA controls the MAX COUNTER VALUE
+  TCCR2B = (1 << CS22) | (1 << CS21) | (1 << CS20); // set prescaler to 1024
+  TIMSK2 = (1 << OCIE2B) | (1 << OCIE2A) | (1 << TOIE2); //enable interrupt to OCR2A and B (certain ticks) and overflow
+  TIFR2 = (1 << OCF2B) | (1 << OCF2A) | (1 << TOV2); //interrupt flag registers
+  OCR2A = 0xFF; //timer 2 top; do not change
+  OCR2B  = 0xFF; //compare match
+  TCNT2 = 1; //offset timer coz OCR2A is TOP
+  GTCCR = 0; // restart timer
+  sei(); //enable global interrupts   
+//  Serial.println("Init done"); 
+//  tcnt2 = counter mismo // can be read and write
+//  OCF2A = enable to allow interrupt 
+  //can be modified to change the TOP (in counter)
+}
