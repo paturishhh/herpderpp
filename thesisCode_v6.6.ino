@@ -118,7 +118,7 @@ void setup(){
 //  }
   
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink node
-//  printRegisters();
+  printRegisters();
  }
 
 void loop(){
@@ -128,7 +128,7 @@ void loop(){
   byte configSentPartCtr; 
   //Communication module - Receive
   if(Serial.available()>0){
-    delay(100);
+//    delay(100);
     while(Serial.available()>0){
       if(!wait)
        serialData = Serial.read();
@@ -418,7 +418,7 @@ void loop(){
           writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
           Serial.println("Writing to file");
         } 
-//        printRegisters(); // prints all to double check
+        printRegisters(); // prints all to double check
      }
      //    checkAllPortMode();
   }
@@ -955,7 +955,7 @@ void calculateOverflow(){
   //CONVERTS TO SECONDS
   if(timeUnit == 0x01 ){//ms 
     timeMS = timeTemp / 1000.0;
-    Serial.println(timeMS,3); //0.99
+//    Serial.println(timeMS,3); //0.99
   }
   else if(timeUnit == 0x02){//sec
     //it is as is
@@ -968,7 +968,7 @@ void calculateOverflow(){
   }
   
   realTime = timeTemp;
-  Serial.println(realTime);
+//  Serial.println(realTime);
 
   //GETTING THE OVERFLOW VALUE IF TIME >=17ms ELSE overflowValue = tickValue
   //9-16ms = 0 overflow - need realTime = totalTicks;
@@ -989,8 +989,8 @@ void calculateOverflow(){
     overflowCount = totalTicks/pow(2, 8); //8 coz timer 2 has 8 bits
   }
  
-  Serial.print("OFC: ");
-  Serial.println(overflowCount);
+//  Serial.print("OFC: ");
+//  Serial.println(overflowCount);
 
   
   //check overflowCount if reached @ INTERRUPT
@@ -1014,7 +1014,7 @@ long bcd2dec(unsigned int nTime){
 
 ISR(TIMER2_OVF_vect){
   timeCtr++;
-  Serial.println(timeCtr);
+//  Serial.println(timeCtr);
 //  Serial.println(timeCtr);
   if((timeCtr%305) == 0){ //5sec
     Serial.println("Five seconds");
@@ -1025,11 +1025,11 @@ ISR(TIMER2_OVF_vect){
     digitalWrite(5, digitalRead(5)^1);
   }
   if((timeCtr%61) == 0){ //1 sec
-    Serial.println("1 sec");
+//    Serial.println("1 sec");
     digitalWrite(6, digitalRead(6)^1);
   }
   if((timeCtr%30) == 0){ //0.5s
-    Serial.println("0.5sec");
+//    Serial.println("0.5sec");
     digitalWrite(7, digitalRead(7)^1);
   }
 }
