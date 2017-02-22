@@ -1,4 +1,4 @@
-#define QUEUE_SIZE 0x08  // @ max 4
+#define QUEUE_SIZE 0x08
 #define BUFFER_SIZE 16
 
 boolean headerFound = false;
@@ -79,6 +79,13 @@ void loop() {
         else if(head == tail && !isEmpty){
           Serial.println("Full Queue");
           printBuffer();
+
+          //testing purposes only
+//          head = head << 1; //moves head to next //deletes 1 slot away start at 0
+//          isEmpty = false;
+//          Serial.println(head, HEX);
+//          Serial.println(tail, HEX);
+//          pos = 0;
         }
         else{
           positionCounter(tail);
@@ -96,7 +103,6 @@ void loop() {
             tail = 0x01;
           }
         }
-        
     }
   }
 }
