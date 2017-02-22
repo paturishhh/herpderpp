@@ -1,4 +1,3 @@
-
 #define QUEUE_SIZE 0x08  // @ max 4
 #define BUFFER_SIZE 16
 
@@ -17,10 +16,18 @@ void setup() {
 }
 
 void printBuffer(){
+  byte x = 0x00;
+  byte halt = false;
   for(byte y = 0x00; y < QUEUE_SIZE; y++){
-    for(byte x = 0x00; x < BUFFER_SIZE; x++){
-      Serial.print(serialQueue[y][x],HEX);
+    for(byte x = 0x00; x < BUFFER_SIZE; x++){  
+      while(!halt){
+        Serial.print(serialQueue[y][x],HEX);
+        if(serialQueue[y][x] == 0xFE)
+          halt = true; 
+        x = x + 0x01;
+      }
     }
+    halt = false;
     Serial.println();
   }
 }
@@ -35,7 +42,6 @@ void positionCounter(byte data){ // position in serial queue
   Serial.print("S: ");
   Serial.println(shiftCounter,HEX);
 }
-
 
 void loop() {
   // you can read one
@@ -65,20 +71,24 @@ void loop() {
           }
           // shift tail
           shiftCounter = 0x00;
+          pos = 0;
           tail = tail << 1;
           headerFound = false;
         }
         // header == tail !empty //full queue
         else if(head == tail && !isEmpty){
           Serial.println("Full Queue");
+          printBuffer();
         }
         else{
           positionCounter(tail);
           for(byte x = 0x00; x < pos; x++){
             //store data to perma queue
             serialQueue[shiftCounter][x] = serialBuffer[x]; 
+//            Serial.println(serialQueue[shiftCounter][x],HEX);
           }
           shiftCounter = 0x00;
+          pos = 0;
           // shift tail
           tail = tail << 1;
           headerFound = false;
@@ -86,23 +96,7 @@ void loop() {
             tail = 0x01;
           }
         }
-//        printBuffer();
         
-//        if(index != QUEUE_SIZE){ //if not max size
-//          for(byte x = 0x00; x < pos; x++){
-//            serialQueue[shiftCounter][x] = serialBuffer[x]; //store data to perma queue
-//          }
-//          index++; 
-//          pos = 0;
-//          headerFound = false;
-//          Serial.println(index); // patched index
-//          printBuffer();
-//        }
-//        else{
-//          Serial.println("Max");
-//        }
-//      }
-//      Serial.print(serialData,HEX);
     }
   }
 }
