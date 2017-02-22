@@ -11,6 +11,8 @@
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
 
+int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
+
 //Messages used which would be saved to the program space (flash) to save space
 const char segmentBranch0[] PROGMEM = "@ PORT CONFIG SEGMENT";
 const char segmentBranch1[] PROGMEM = "@ TIME SEGMENT";
@@ -58,7 +60,6 @@ byte physicalAddress = 0x01; //unique address of the node (frodam 0-255) (source
 byte destAddress = 0x00; //destination address (source address is set to destination address)
 byte sourceAddress = 0x00;
 byte configVersion = 0x00; //node config version
-int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
 byte maxAttempt = 0x03; //for contacting the sink
 
 byte apiCount = 0x01; //API version
@@ -76,7 +77,7 @@ unsigned int eventSegment[(int) PORT_COUNT * 2]; //event segment - 24 slots (0-2
 unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment
 byte segmentCounter = 0x00;  // counter for parsing the parts of the packet
 byte tempModeStorage = 0x00; // stores the port config 00-07
-byte portNum = 0x00;
+byte portNum = 0x00;//parsing var
 byte partCounter = 0x00; //part of the data counter when receiving configs
 //byte actuatorPort = 0x00; //actuator port for event triggered
 byte commandValue = 0x00; // for api = 3, contains the command value
@@ -84,6 +85,7 @@ byte checker = 0x00; // for api = 2 checker for threshold/range mode; api = 3 co
 volatile unsigned long timeCtr; // counter for overflows
 long portOverflowCounts [(int) PORT_COUNT]; //stores the overflow counters to be checked by interrupt
 String serialBuffer[10]; // stores the buffer at serial
+byte errorFlag = 0x00; // bits correspond to an error
 
 void setup(){
   //test pins for timer
@@ -113,12 +115,18 @@ void setup(){
   memset(actuatorDetailSegment,0,sizeof(actuatorDetailSegment)); 
   memset(portOverflowCounts, 0, sizeof(portOverflowCounts));
 
-//  if(SD.begin(CS_PIN)){ // uncomment entire if to reset node (to all 0)
+//  if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
 //    writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
+//  }
+//  else{
+//    byte temp = 0x01;
+//    errorFlag |= temp; // cannot access sd card
+//    Serial.println(errorFlag, HEX);
 //  }
   
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink node
-  printRegisters();
+  //you cannot run write and load back to back coz you call sd.begin twice 
+//  printRegisters();
  }
 
 void loop(){
@@ -416,9 +424,8 @@ void loop(){
         portNum = 00; 
         if((apiCount == 0x03 && configSentPartCtr==0x03) || apiCount != 0x03 ){ //all other apis except if api is 3, then ctr has to be 3
           writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
-          Serial.println("Writing to file");
         } 
-        printRegisters(); // prints all to double check
+//        printRegisters(); // prints all to double check
      }
      //    checkAllPortMode();
   }
@@ -488,10 +495,13 @@ void loadConfig(){ //loads config file and applies it to the registers
   byte index = 0x00;
   byte hiByte = 0x00;
   byte loByte = 0x00;
+  byte temp = 0x01; //for setting error flag
   
   if(!SD.begin(CS_PIN)){//in case sd card is not read
-    strcpy_P(buffer, (char*)pgm_read_word(&(messages[25])));
-    Serial.println(buffer); //error
+//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[25])));
+//    Serial.println(buffer); //error
+    errorFlag |= temp;
+    Serial.println(errorFlag, HEX);
     //contact sink node
   }
   else{
@@ -622,8 +632,11 @@ void loadConfig(){ //loads config file and applies it to the registers
       calculateOverflow();
     }
     else{
-      strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
-      Serial.println(buffer); //error
+//      strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
+//      Serial.println(buffer); //error
+      byte temp = 0x08; 
+      errorFlag |= 0x08; //setting error flag
+      Serial.println(errorFlag, HEX);
     }
   }
 }
@@ -681,8 +694,11 @@ void writeConfig(){  // writes node configuration to SD card
       Serial.println("Writing finish");
     }
     else{
-      strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
-      Serial.println(buffer); //error
+//      strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
+//      Serial.println(buffer); //error
+      byte temp = 0x08; 
+      errorFlag |= 0x08; //setting error flag
+      Serial.println(errorFlag, HEX);
     }
 //  }
 //  else{
