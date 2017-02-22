@@ -69,7 +69,7 @@ void loop() {
           headerFound = false;
         }
         // header == tail !empty //full queue
-        else if(head == tail && isEmpty){
+        else if(head == tail && !isEmpty){
           Serial.println("Full Queue");
         }
         else{
@@ -82,8 +82,9 @@ void loop() {
           // shift tail
           tail = tail << 1;
           headerFound = false;
-          Serial.print("T: ");
-          Serial.println(tail,HEX);
+          if(tail == 0x00){
+            tail = 0x01;
+          }
         }
 //        printBuffer();
         
