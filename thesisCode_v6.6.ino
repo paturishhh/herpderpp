@@ -10,8 +10,53 @@
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
+#define QUEUE_SIZE 0x08 // Queue for packet and serial
+#define BUFFER_SIZE 0x10 // bytes queue will hold
 
 int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
+byte errorFlag = 0x00; // bits correspond to an error
+byte logicalAddress = 0x00; //contains address of the network
+byte physicalAddress = 0x01; //unique address of the node (frodam 0-255) (source address)
+byte destAddress = 0x00; //destination address (source address is set to destination address)
+byte sourceAddress = 0x00;
+byte configVersion = 0x00; //node config version
+byte maxAttempt = 0x03; //for contacting the sink
+boolean requestConfig = false; // checks if node is requesting config
+
+byte apiCount = 0x01; //API version
+byte commandCount = 0x00; //command being served
+byte commandCounter = 0x00; //commandCounter for commands; for receiving
+String packetReply = ""; //packet used to reply to node
+unsigned int eventNotif; //event triggered command notification
+unsigned int onDemandRegister; // if set, then there is an odm; 0-15
+
+byte portConfigSegment[(int) PORT_COUNT]; // contains port type, odm/event/time mode
+unsigned int actuatorValueOnDemandSegment[(int) PORT_COUNT]; // stores data to write on actuator if ODM
+unsigned int portValue[(int) PORT_COUNT]; //stores port values but in BCD
+unsigned int timerSegment[(int) PORT_COUNT]; //timer segment
+unsigned int eventSegment[(int) PORT_COUNT * 2]; //event segment - 24 slots (0-23(17h)) 0-B (if threshold mode) C-17 (if range mode)
+unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment
+byte segmentCounter = 0x00;  // counter for parsing the parts of the packet
+byte tempModeStorage = 0x00; // stores the port config 00-07
+byte portNum = 0x00;//parsing var
+byte partCounter = 0x00; //part of the data counter when receiving configs
+//byte actuatorPort = 0x00; //actuator port for event triggered
+byte commandValue = 0x00; // for api = 3, contains the command value
+byte checker = 0x00; // for api = 2 checker for threshold/range mode; api = 3 counter for receive
+
+boolean headerFound = false;
+byte serialQueue[QUEUE_SIZE][BUFFER_SIZE];
+byte serialBuffer[BUFFER_SIZE];
+//for queue
+byte serialHead = 0x00;
+byte serialTail = 0x00;
+boolean isEmpty = true;
+boolean isService = false; // status to check serialQueue ; set only when no packet is received or queue is full
+boolean isFull = false; 
+
+volatile unsigned long timeCtr; // counter for overflows
+long portOverflowCounts [(int) PORT_COUNT]; //stores the overflow counters to be checked by interrupt
+
 
 //Messages used which would be saved to the program space (flash) to save space
 const char segmentBranch0[] PROGMEM = "@ PORT CONFIG SEGMENT";
@@ -54,392 +99,6 @@ const char* const messages[] PROGMEM = {segmentBranch0, segmentBranch1, segmentB
                                       errorMessage0,infoMessage0, infoMessage1, infoMessage2, actuatorDetail0, infoMessage3, infoMessage4, infoMessage5, infoMessage6, infoMessage7,
                                       infoMessage8, infoMessage9, infoMessage10, infoMessage11, errorMessage1, errorMessage2, infoMessage12, infoMessage13, infoMessage14, infoMessage15, infoMessage16, infoMessage17, infoMessage18, infoMessage19 };
 char buffer[32]; //update according to longest message
-
-byte logicalAddress = 0x00; //contains address of the network
-byte physicalAddress = 0x01; //unique address of the node (frodam 0-255) (source address)
-byte destAddress = 0x00; //destination address (source address is set to destination address)
-byte sourceAddress = 0x00;
-byte configVersion = 0x00; //node config version
-byte maxAttempt = 0x03; //for contacting the sink
-
-byte apiCount = 0x01; //API version
-byte commandCount = 0x00; //command being served
-byte commandCounter = 0x00; //commandCounter for commands; for receiving
-String packetReply = ""; //packet used to reply to node
-unsigned int eventNotif; //event triggered command notification
-unsigned int onDemandRegister; // if set, then there is an odm; 0-15
-
-byte portConfigSegment[(int) PORT_COUNT]; // contains port type, odm/event/time mode
-unsigned int actuatorValueOnDemandSegment[(int) PORT_COUNT]; // stores data to write on actuator if ODM
-unsigned int portValue[(int) PORT_COUNT]; //stores port values but in BCD
-unsigned int timerSegment[(int) PORT_COUNT]; //timer segment
-unsigned int eventSegment[(int) PORT_COUNT * 2]; //event segment - 24 slots (0-23(17h)) 0-B (if threshold mode) C-17 (if range mode)
-unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment
-byte segmentCounter = 0x00;  // counter for parsing the parts of the packet
-byte tempModeStorage = 0x00; // stores the port config 00-07
-byte portNum = 0x00;//parsing var
-byte partCounter = 0x00; //part of the data counter when receiving configs
-//byte actuatorPort = 0x00; //actuator port for event triggered
-byte commandValue = 0x00; // for api = 3, contains the command value
-byte checker = 0x00; // for api = 2 checker for threshold/range mode; api = 3 counter for receive
-volatile unsigned long timeCtr; // counter for overflows
-long portOverflowCounts [(int) PORT_COUNT]; //stores the overflow counters to be checked by interrupt
-String serialBuffer[10]; // stores the buffer at serial
-byte errorFlag = 0x00; // bits correspond to an error
-
-void setup(){
-  //test pins for timer
-  pinMode(4, OUTPUT);
-  pinMode(5, OUTPUT);
-  pinMode(6, OUTPUT);
-  pinMode(7, OUTPUT);
-  pinMode(CS_PIN, OUTPUT); 
-  digitalWrite(CS_PIN, HIGH);
-
-   // to initiate serial communication
-  Serial.begin(9600);
-  timeCtr = 0;
-
-// NOTE: AVOID PUTTING STUFF ON PIN 0 & 1 coz that is where serial is (programming, debugging)
-  for (byte c=0x00; c<0x0C; c++){
-    setPortConfigSegmentInit(c, 0); // set the port to input
-//    Serial.print("Port Config Segment at Start: ");
-//    Serial.println(getPortConfigSegment(c), HEX);
-  }
-  
-  //sets values of the arrays to 0, needed else it would not print anything
-  memset(actuatorValueOnDemandSegment,0,sizeof(actuatorValueOnDemandSegment)); 
-  memset(portValue,0,sizeof(portValue)); 
-  memset(timerSegment,0,sizeof(timerSegment)); 
-  memset(eventSegment,0,sizeof(eventSegment)); 
-  memset(actuatorDetailSegment,0,sizeof(actuatorDetailSegment)); 
-  memset(portOverflowCounts, 0, sizeof(portOverflowCounts));
-
-//  if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
-//    writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
-//  }
-//  else{
-//    byte temp = 0x01;
-//    errorFlag |= temp; // cannot access sd card
-//    Serial.println(errorFlag, HEX);
-//  }
-  
-  loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink node
-  //you cannot run write and load back to back coz you call sd.begin twice 
-//  printRegisters();
- }
-
-void loop(){
-  boolean wait = 0;
-  byte attemptCounter; //for contacting the sink
-  byte serialData;  //temporary store of data read from Serial
-  byte configSentPartCtr; 
-  //Communication module - Receive
-  if(Serial.available()>0){
-//    delay(100);
-    while(Serial.available()>0){
-      if(!wait)
-       serialData = Serial.read();
-      else wait = 0;
-      
-      if(serialData == 0xFF && segmentCounter == 0x00){ //HEADER
-        segmentCounter = 0x01;
-      }
-      else if(segmentCounter == 0x01){ //SOURCE 
-        sourceAddress = (byte)serialData; 
-        segmentCounter = 0x02;
-      }
-      else if(segmentCounter == 0x02){ //DESTINATION 
-        if(serialData != physicalAddress){ //in case di pala para sa kanya; kasi broadcast mode si xbee; technically drop ze packet
-          segmentCounter = 0x00;
-          destAddress = (byte)serialData;
-        }
-        else{
-          segmentCounter = 0x03; //I think.. ilagay nalang yung physical address ni node mismo
-        }
-      }
-      else if(segmentCounter == 0x03){ //API
-        apiCount = (byte)serialData;
-        if(apiCount==2){ // if CONFIG mode, else iba na ieexpect niya na mga kasama na segment
-          segmentCounter = 0x04; // check config version
-        }
-        else if(apiCount==3){ // if Node Discovery Mode, expects  command parameter
-          segmentCounter = 0x0B; //command parameter
-        }
-        else{ //pero technically dapat error na ito
-          segmentCounter = 0x05; // go straight to count ; for debug purpose lang
-        }
-        
-      }
-      else if(segmentCounter == 0x04){ // CONFIG VERSION IF API = 2
-         if(configVersion <= serialData){ // if newer yung config version
-          configVersion = serialData; //take it
-          segmentCounter = 0x05; // check count
-         }
-         else{ //Current node config is most recent
-          segmentCounter = 0x00;
-         }
-      }
-      else if(segmentCounter == 0x05){ // COUNT
-        if(serialData < MAX_COMMAND){ // if not greater than max command count per packet :D
-          commandCount = byte(serialData);
-          segmentCounter = 0x06; //get port configuration
-        }
-        else{ // More than maximum commands that node can handle
-          segmentCounter = 0x00;
-        }
-      }
-      else if(segmentCounter == 0x06){ // PORT CONFIGURATION SEGMENT
-        strcpy_P(buffer, (char*)pgm_read_word(&(messages[0])));
-        Serial.println(buffer);
-        portNum = 0xF0 & serialData; // to get port number; @ upper byte
-        portNum = portNum >> 4; // move it to the right
-        setPortConfigSegment(portNum, serialData); // stored to port config segment
-        tempModeStorage = serialData & 0x07; // stores the modes sent; @ lower byte
-
-        checkPortModesSent(); // checks modes sent serving timer > event > odm
-      }
-      else if(segmentCounter == 0x07){ // TIME SEGMENT
-        strcpy_P(buffer, (char*)pgm_read_word(&(messages[1])));
-        Serial.println(buffer);
-        setTimerSegment(portNum, serialData);
-        if(partCounter==0x01) { //next part of the time is found
-          tempModeStorage = tempModeStorage ^ 0x01; // xor to turn off time base flag
-          partCounter = 0x00; //reset part counter
-          if(tempModeStorage!=0) { //may iba pang modes; hanapin natin
-            checkPortModesSent();
-          }
-          else{ //kung time based lang yung port na yun
-            checkOtherCommands(); // check if there are still other configurations
-          }
-        }
-        else{ // find next part of time
-          partCounter = partCounter + 0x01;
-        }
-      }
-      else if(segmentCounter == 0x08){ // EVENT SEGMENT
-        setEventSegment(portNum, serialData);
-        if(partCounter == 0x00){
-          checker = serialData & 0x80; // if 0x80 then, range mode else threshold mode
-          partCounter = partCounter | 0x01; // increment to get next part
-        }
-        else if(partCounter == 0x01){ //partCounter == 0x01
-          if(checker == 0x80){ 
-            strcpy_P(buffer, (char*)pgm_read_word(&(messages[12])));
-            Serial.println(buffer);
-            segmentCounter = 0x09; // next range value
-            partCounter = 0x00;
-            checker = 0x00;
-          }
-          else{
-            strcpy_P(buffer, (char*)pgm_read_word(&(messages[13])));
-            Serial.println(buffer);
-            segmentCounter = 0x0A; // threshold mode; one value only
-            partCounter = 0x00;
-          }
-        }
-      }
-      else if(segmentCounter == 0x09){ // RANGE MODE (EVENT MODE) SECOND VALUE
-        setRangeSegment(portNum, serialData);
-        if(partCounter == 0x00){
-          partCounter = partCounter | 0x01;   
-        }
-        else if(partCounter == 0x01){
-          segmentCounter = 0x0A; // to actuator details
-          partCounter = 0x00; // reset part counter
-          checker = 0x00; // coz it was not reset
-        }
-      }
-      else if(segmentCounter == 0x0A){// ACTUATOR DETAILS
-        strcpy_P(buffer, (char*)pgm_read_word(&(messages[3])));
-        Serial.println(buffer);
-        setActuatorDetailSegment(portNum, serialData); 
-        if(partCounter == 0x01){ // next part of actuator detail segment is found
-          partCounter = 0x00; //reset part counter
-          checker = 0x00;
-          tempModeStorage = tempModeStorage ^ 0x02; // xor to turn off event flag
-          if(tempModeStorage!=0) { //may iba pang mode, most likely odm
-            checkPortModesSent();
-          }
-          else{ //kung event triggered lang yung port na yun
-            checkOtherCommands(); // check if there are still other configurations
-          }          
-        }
-        else{
-          partCounter = 0x01; // increment part counter
-        }
-      }
-      else if(segmentCounter == 0x0B){ //COMMAND PARAMETER FOR API == 3
-        if (serialData == 0x00){ // Request keep alive message
-          commandValue = 0x01; // sets lsb to indicate request keep alive is there
-          strcpy_P(buffer, (char*)pgm_read_word(&(messages[14])));
-          Serial.println(buffer);
-          segmentCounter = 0xFF; // go to footer
-        }
-        if (serialData == 0xFF){ // receive configuration
-          commandValue = 0xFF; //sets 1st bit to indicate a config is coming
-          strcpy_P(buffer, (char*)pgm_read_word(&(messages[34])));
-          Serial.println(buffer);
-          segmentCounter = 0x0C; //check how many parts
-        }
-      }
-      else if(segmentCounter == 0x0C){ //part checker
-        configSentPartCtr = serialData;
-        if(serialData == 0x00){
-          segmentCounter = 0x15; //actuator detail
-        }
-        else if (serialData == 0x01) {
-          segmentCounter = 0x14;//event segment
-        }
-        else if (serialData == 0x02) {
-          segmentCounter = 0x13; //timer segment
-        }
-        else if (serialData == 0x03) {
-          segmentCounter = 0x0E; //logical to actuator value on demand
-        }
-      }
-      else if(segmentCounter == 0x0D){ // ODM - ACTUATOR SEGMENT
-        strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
-        Serial.print(buffer);
-        Serial.println(serialData,HEX); 
-        setActuatorValueOnDemandSegment(portNum, serialData);
-
-        if(partCounter == 0x01){ // if last part
-          tempModeStorage = tempModeStorage ^ 0x04; // switch off odm flag;  assumes dapat 0 na value ni tempMode Storage
-          partCounter = partCounter ^ partCounter; // reset part counter
-          checkOtherCommands(); // check if there are still other configurations
-        }
-        else{
-          partCounter = partCounter | 0x01;
-        }
-      }
-      else if(segmentCounter == 0x0E){ //API == 3 GET CONFIG - logical address
-        logicalAddress  = serialData;
-        segmentCounter = 0x0F; 
-      }
-      else if(segmentCounter == 0x0F){ //GET CONFIG - physical
-        physicalAddress = serialData;
-        segmentCounter = 0x10;
-      }
-      else if(segmentCounter == 0x10){ //GET CONFIG VERSION
-        configVersion = serialData;
-        segmentCounter = 0x11;
-      }
-      else if(segmentCounter == 0x11){ //PORT CONFIG
-        setPortConfigSegment(checker, serialData);
-        partCounter = 0x00;
-        if(checker != PORT_COUNT -1){
-          checker = checker + 0x01;
-        }
-        else{
-          segmentCounter = 0x12; 
-          checker = 0x00;
-        }
-      }
-      else if(segmentCounter == 0x12){ // PORT CONFIG - ACUATOR VALUE ON DEMAND
-//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
-//        Serial.println(buffer);
-        setActuatorValueOnDemandSegment(checker, serialData);
-        if(partCounter == 0x01){ // if last part ng data
-          if(checker != PORT_COUNT-1){
-            checker = checker + 0x01; // next port
-            partCounter = partCounter ^ partCounter; // reset data
-          }
-          else{
-            segmentCounter = 0xFF; // Footer
-            checker = checker ^ checker; // clear port
-            partCounter = partCounter ^ partCounter; //reset
-          }
-        }
-        else{
-          partCounter = partCounter | 0x01; // move to next
-        }
-      }
-      else if(segmentCounter == 0x13){ //PORT CONFIG - TIMER SEGMENT
-//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[1])));
-//        Serial.println(buffer);
-        setTimerSegment(checker, serialData);
-        if(partCounter == 0x01){
-          if(checker != PORT_COUNT -1){
-            checker = checker + 0x01; // next port
-            partCounter = partCounter ^ partCounter; // reset data
-          }
-          else{
-            segmentCounter = 0xFF; // Footer
-            checker = checker ^ checker; // clear port
-            partCounter = partCounter ^ partCounter; //reset
-          }
-        }
-        else{
-          partCounter = partCounter | 0x01; // move to next
-        }
-      }
-      else if(segmentCounter == 0x14){ // PORT CONFIG - EVENT SEGMENT
-        Serial.print("Serial Data: ");
-        Serial.println(serialData,HEX);
-        setEventSegment(checker, serialData); 
-        if(partCounter == 0x01){
-          if(checker != ((PORT_COUNT*0x02) - 0x01)){
-            checker = checker + 0x01; // next port
-            partCounter = partCounter ^ partCounter; // reset data
-          }
-          else{
-            segmentCounter = 0xFF; // go to footer
-            checker = checker ^ checker; // clear port
-            partCounter = partCounter ^ partCounter; //reset
-          }
-        }
-        else{
-          partCounter = partCounter | 0x01;
-        }
-      }
-      else if(segmentCounter == 0x15){ // PORT CONFIG - ACTUATOR DETAIL
-        strcpy_P(buffer, (char*)pgm_read_word(&(messages[3])));
-        Serial.println(buffer);
-        setActuatorDetailSegment(checker, serialData);
-        if(partCounter == 0x01){
-          if(checker != PORT_COUNT -1){
-            checker++; // next port
-            partCounter = partCounter ^ partCounter; // reset data
-          }
-          else{
-            segmentCounter = 0xFF; // go to footers
-            checker = checker ^ checker; // clear port
-            partCounter = partCounter ^ partCounter; //reset
-          }
-        }
-        else{
-          partCounter = partCounter | 0x01; // move to next
-        }
-        
-      }
-      else if(segmentCounter == 0xFF && serialData == 0xFE){ // FOOTER
-        strcpy_P(buffer, (char*)pgm_read_word(&(messages[16])));
-        Serial.println(buffer);
-        segmentCounter = 0x00; //reset to check next packet
-        commandCounter = 0x00;
-        tempModeStorage = 0x00;    
-        checker = 00;
-        partCounter = 00;
-        portNum = 00; 
-        if((apiCount == 0x03 && configSentPartCtr==0x03) || apiCount != 0x03 ){ //all other apis except if api is 3, then ctr has to be 3
-          writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
-        } 
-//        printRegisters(); // prints all to double check
-     }
-     //    checkAllPortMode();
-  }
-    
- }
-    //after loop; do what is said there sa port config segment
-    //set ports if output or input
-    //event triggered - set actuator port mode in actuator details
-    
-    
-    if (onDemandRegister !=0x00){ // checks if there are odm commands
-//      triggerOnDemand();
-    }
-}
 
 /************* Other Node Modules *************/
 void triggerOnDemand(){
@@ -708,6 +367,23 @@ void writeConfig(){  // writes node configuration to SD card
   
 }
 /************* Utilities *************/
+void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // prints serialBuffer
+  byte x = 0x00;
+  byte halt = false;
+  for(byte y = 0x00; y < QUEUE_SIZE; y++){
+    for(byte x = 0x00; x < BUFFER_SIZE; x++){  
+      while(!halt){
+        Serial.print(temp[y][x],HEX);
+        if(temp[y][x] == 0xFE)
+          halt = true; 
+        x = x + 0x01;
+      }
+    }
+    halt = false;
+    Serial.println();
+  }
+}
+
 void printRegisters(){ // prints all variables stored in the sd card
   strcpy_P(buffer, (char*)pgm_read_word(&(messages[27])));
   Serial.print(buffer); 
@@ -1061,3 +737,420 @@ void initializeTimer(){
   TIMSK2 |= (1 << TOIE2); //enable interrupt to overflow
   sei(); //enable global interrupts  
 }
+
+void setup(){
+  //test pins for timer
+  pinMode(4, OUTPUT);
+  pinMode(5, OUTPUT);
+  pinMode(6, OUTPUT);
+  pinMode(7, OUTPUT);
+  pinMode(CS_PIN, OUTPUT); 
+  digitalWrite(CS_PIN, HIGH);
+
+   // to initiate serial communication
+  Serial.begin(9600);
+  timeCtr = 0;
+
+// NOTE: AVOID PUTTING STUFF ON PIN 0 & 1 coz that is where serial is (programming, debugging)
+  for (byte c=0x00; c<0x0C; c++){
+    setPortConfigSegmentInit(c, 0); // set the port to input
+//    Serial.print("Port Config Segment at Start: ");
+//    Serial.println(getPortConfigSegment(c), HEX);
+  }
+  
+  //sets values of the arrays to 0, needed else it would not print anything
+  memset(actuatorValueOnDemandSegment,0,sizeof(actuatorValueOnDemandSegment)); 
+  memset(portValue,0,sizeof(portValue)); 
+  memset(timerSegment,0,sizeof(timerSegment)); 
+  memset(eventSegment,0,sizeof(eventSegment)); 
+  memset(actuatorDetailSegment,0,sizeof(actuatorDetailSegment)); 
+  memset(portOverflowCounts, 0, sizeof(portOverflowCounts));
+  memset(serialBuffer,0x00, sizeof(serialBuffer));
+  memset(serialQueue, 0x00, sizeof(serialQueue));
+
+//  if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
+//    writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
+//  }
+//  else{
+//    byte temp = 0x01;
+//    errorFlag |= temp; // cannot access sd card
+//    Serial.println(errorFlag, HEX);
+//  }
+  
+  loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink node
+  //you cannot run write and load back to back coz you call sd.begin twice 
+//  printRegisters();
+ }
+
+void loop(){
+  boolean wait = 0;
+  byte attemptCounter; //for contacting the sink
+  byte serialData;  //temporary store of data read from Serial
+  byte configSentPartCtr; 
+  static byte index = 0; //for queue
+  static size_t pos = 0; //for buffer
+  
+  //Communication module - Receive
+  
+//  if(Serial.available()>0){
+////    delay(100);
+//    while(Serial.available()>0){
+//      if(!wait)
+//       serialData = Serial.read();
+//      else wait = 0;
+//      
+//      if(serialData == 0xFF && segmentCounter == 0x00){ //HEADER
+//        segmentCounter = 0x01;
+//      }
+//      else if(segmentCounter == 0x01){ //SOURCE 
+//        sourceAddress = (byte)serialData; 
+//        segmentCounter = 0x02;
+//      }
+//      else if(segmentCounter == 0x02){ //DESTINATION 
+//        if(serialData != physicalAddress){ //in case di pala para sa kanya; kasi broadcast mode si xbee; technically drop ze packet
+//          segmentCounter = 0x00;
+//          destAddress = (byte)serialData;
+//        }
+//        else{
+//          segmentCounter = 0x03; //I think.. ilagay nalang yung physical address ni node mismo
+//        }
+//      }
+//      else if(segmentCounter == 0x03){ //API
+//        apiCount = (byte)serialData;
+//        if(apiCount==2){ // if CONFIG mode, else iba na ieexpect niya na mga kasama na segment
+//          segmentCounter = 0x04; // check config version
+//        }
+//        else if(apiCount==3){ // if Node Discovery Mode, expects  command parameter
+//          segmentCounter = 0x0B; //command parameter
+//        }
+//        else{ //pero technically dapat error na ito
+//          segmentCounter = 0x05; // go straight to count ; for debug purpose lang
+//        }
+//        
+//      }
+//      else if(segmentCounter == 0x04){ // CONFIG VERSION IF API = 2
+//         if(configVersion <= serialData){ // if newer yung config version
+//          configVersion = serialData; //take it
+//          segmentCounter = 0x05; // check count
+//         }
+//         else{ //Current node config is most recent
+//          segmentCounter = 0x00;
+//         }
+//      }
+//      else if(segmentCounter == 0x05){ // COUNT
+//        if(serialData < MAX_COMMAND){ // if not greater than max command count per packet :D
+//          commandCount = byte(serialData);
+//          segmentCounter = 0x06; //get port configuration
+//        }
+//        else{ // More than maximum commands that node can handle
+//          segmentCounter = 0x00;
+//        }
+//      }
+//      else if(segmentCounter == 0x06){ // PORT CONFIGURATION SEGMENT
+//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[0])));
+//        Serial.println(buffer);
+//        portNum = 0xF0 & serialData; // to get port number; @ upper byte
+//        portNum = portNum >> 4; // move it to the right
+//        setPortConfigSegment(portNum, serialData); // stored to port config segment
+//        tempModeStorage = serialData & 0x07; // stores the modes sent; @ lower byte
+//
+//        checkPortModesSent(); // checks modes sent serving timer > event > odm
+//      }
+//      else if(segmentCounter == 0x07){ // TIME SEGMENT
+//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[1])));
+//        Serial.println(buffer);
+//        setTimerSegment(portNum, serialData);
+//        if(partCounter==0x01) { //next part of the time is found
+//          tempModeStorage = tempModeStorage ^ 0x01; // xor to turn off time base flag
+//          partCounter = 0x00; //reset part counter
+//          if(tempModeStorage!=0) { //may iba pang modes; hanapin natin
+//            checkPortModesSent();
+//          }
+//          else{ //kung time based lang yung port na yun
+//            checkOtherCommands(); // check if there are still other configurations
+//          }
+//        }
+//        else{ // find next part of time
+//          partCounter = partCounter + 0x01;
+//        }
+//      }
+//      else if(segmentCounter == 0x08){ // EVENT SEGMENT
+//        setEventSegment(portNum, serialData);
+//        if(partCounter == 0x00){
+//          checker = serialData & 0x80; // if 0x80 then, range mode else threshold mode
+//          partCounter = partCounter | 0x01; // increment to get next part
+//        }
+//        else if(partCounter == 0x01){ //partCounter == 0x01
+//          if(checker == 0x80){ 
+//            strcpy_P(buffer, (char*)pgm_read_word(&(messages[12])));
+//            Serial.println(buffer);
+//            segmentCounter = 0x09; // next range value
+//            partCounter = 0x00;
+//            checker = 0x00;
+//          }
+//          else{
+//            strcpy_P(buffer, (char*)pgm_read_word(&(messages[13])));
+//            Serial.println(buffer);
+//            segmentCounter = 0x0A; // threshold mode; one value only
+//            partCounter = 0x00;
+//          }
+//        }
+//      }
+//      else if(segmentCounter == 0x09){ // RANGE MODE (EVENT MODE) SECOND VALUE
+//        setRangeSegment(portNum, serialData);
+//        if(partCounter == 0x00){
+//          partCounter = partCounter | 0x01;   
+//        }
+//        else if(partCounter == 0x01){
+//          segmentCounter = 0x0A; // to actuator details
+//          partCounter = 0x00; // reset part counter
+//          checker = 0x00; // coz it was not reset
+//        }
+//      }
+//      else if(segmentCounter == 0x0A){// ACTUATOR DETAILS
+//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[3])));
+//        Serial.println(buffer);
+//        setActuatorDetailSegment(portNum, serialData); 
+//        if(partCounter == 0x01){ // next part of actuator detail segment is found
+//          partCounter = 0x00; //reset part counter
+//          checker = 0x00;
+//          tempModeStorage = tempModeStorage ^ 0x02; // xor to turn off event flag
+//          if(tempModeStorage!=0) { //may iba pang mode, most likely odm
+//            checkPortModesSent();
+//          }
+//          else{ //kung event triggered lang yung port na yun
+//            checkOtherCommands(); // check if there are still other configurations
+//          }          
+//        }
+//        else{
+//          partCounter = 0x01; // increment part counter
+//        }
+//      }
+//      else if(segmentCounter == 0x0B){ //COMMAND PARAMETER FOR API == 3
+//        if (serialData == 0x00){ // Request keep alive message
+//          commandValue = 0x01; // sets lsb to indicate request keep alive is there
+//          strcpy_P(buffer, (char*)pgm_read_word(&(messages[14])));
+//          Serial.println(buffer);
+//          segmentCounter = 0xFF; // go to footer
+//        }
+//        if (serialData == 0xFF){ // receive configuration
+//          commandValue = 0xFF; //sets 1st bit to indicate a config is coming
+//          strcpy_P(buffer, (char*)pgm_read_word(&(messages[34])));
+//          Serial.println(buffer);
+//          segmentCounter = 0x0C; //check how many parts
+//        }
+//      }
+//      else if(segmentCounter == 0x0C){ //part checker
+//        configSentPartCtr = serialData;
+//        if(serialData == 0x00){
+//          segmentCounter = 0x15; //actuator detail
+//        }
+//        else if (serialData == 0x01) {
+//          segmentCounter = 0x14;//event segment
+//        }
+//        else if (serialData == 0x02) {
+//          segmentCounter = 0x13; //timer segment
+//        }
+//        else if (serialData == 0x03) {
+//          segmentCounter = 0x0E; //logical to actuator value on demand
+//        }
+//      }
+//      else if(segmentCounter == 0x0D){ // ODM - ACTUATOR SEGMENT
+//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
+//        Serial.print(buffer);
+//        Serial.println(serialData,HEX); 
+//        setActuatorValueOnDemandSegment(portNum, serialData);
+//
+//        if(partCounter == 0x01){ // if last part
+//          tempModeStorage = tempModeStorage ^ 0x04; // switch off odm flag;  assumes dapat 0 na value ni tempMode Storage
+//          partCounter = partCounter ^ partCounter; // reset part counter
+//          checkOtherCommands(); // check if there are still other configurations
+//        }
+//        else{
+//          partCounter = partCounter | 0x01;
+//        }
+//      }
+//      else if(segmentCounter == 0x0E){ //API == 3 GET CONFIG - logical address
+//        logicalAddress  = serialData;
+//        segmentCounter = 0x0F; 
+//      }
+//      else if(segmentCounter == 0x0F){ //GET CONFIG - physical
+//        physicalAddress = serialData;
+//        segmentCounter = 0x10;
+//      }
+//      else if(segmentCounter == 0x10){ //GET CONFIG VERSION
+//        configVersion = serialData;
+//        segmentCounter = 0x11;
+//      }
+//      else if(segmentCounter == 0x11){ //PORT CONFIG
+//        setPortConfigSegment(checker, serialData);
+//        partCounter = 0x00;
+//        if(checker != PORT_COUNT -1){
+//          checker = checker + 0x01;
+//        }
+//        else{
+//          segmentCounter = 0x12; 
+//          checker = 0x00;
+//        }
+//      }
+//      else if(segmentCounter == 0x12){ // PORT CONFIG - ACUATOR VALUE ON DEMAND
+////        strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
+////        Serial.println(buffer);
+//        setActuatorValueOnDemandSegment(checker, serialData);
+//        if(partCounter == 0x01){ // if last part ng data
+//          if(checker != PORT_COUNT-1){
+//            checker = checker + 0x01; // next port
+//            partCounter = partCounter ^ partCounter; // reset data
+//          }
+//          else{
+//            segmentCounter = 0xFF; // Footer
+//            checker = checker ^ checker; // clear port
+//            partCounter = partCounter ^ partCounter; //reset
+//          }
+//        }
+//        else{
+//          partCounter = partCounter | 0x01; // move to next
+//        }
+//      }
+//      else if(segmentCounter == 0x13){ //PORT CONFIG - TIMER SEGMENT
+////        strcpy_P(buffer, (char*)pgm_read_word(&(messages[1])));
+////        Serial.println(buffer);
+//        setTimerSegment(checker, serialData);
+//        if(partCounter == 0x01){
+//          if(checker != PORT_COUNT -1){
+//            checker = checker + 0x01; // next port
+//            partCounter = partCounter ^ partCounter; // reset data
+//          }
+//          else{
+//            segmentCounter = 0xFF; // Footer
+//            checker = checker ^ checker; // clear port
+//            partCounter = partCounter ^ partCounter; //reset
+//          }
+//        }
+//        else{
+//          partCounter = partCounter | 0x01; // move to next
+//        }
+//      }
+//      else if(segmentCounter == 0x14){ // PORT CONFIG - EVENT SEGMENT
+//        Serial.print("Serial Data: ");
+//        Serial.println(serialData,HEX);
+//        setEventSegment(checker, serialData); 
+//        if(partCounter == 0x01){
+//          if(checker != ((PORT_COUNT*0x02) - 0x01)){
+//            checker = checker + 0x01; // next port
+//            partCounter = partCounter ^ partCounter; // reset data
+//          }
+//          else{
+//            segmentCounter = 0xFF; // go to footer
+//            checker = checker ^ checker; // clear port
+//            partCounter = partCounter ^ partCounter; //reset
+//          }
+//        }
+//        else{
+//          partCounter = partCounter | 0x01;
+//        }
+//      }
+//      else if(segmentCounter == 0x15){ // PORT CONFIG - ACTUATOR DETAIL
+//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[3])));
+//        Serial.println(buffer);
+//        setActuatorDetailSegment(checker, serialData);
+//        if(partCounter == 0x01){
+//          if(checker != PORT_COUNT -1){
+//            checker++; // next port
+//            partCounter = partCounter ^ partCounter; // reset data
+//          }
+//          else{
+//            segmentCounter = 0xFF; // go to footers
+//            checker = checker ^ checker; // clear port
+//            partCounter = partCounter ^ partCounter; //reset
+//          }
+//        }
+//        else{
+//          partCounter = partCounter | 0x01; // move to next
+//        }
+//        
+//      }
+//      else if(segmentCounter == 0xFF && serialData == 0xFE){ // FOOTER
+//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[16])));
+//        Serial.println(buffer);
+//        segmentCounter = 0x00; //reset to check next packet
+//        commandCounter = 0x00;
+//        tempModeStorage = 0x00;    
+//        checker = 00;
+//        partCounter = 00;
+//        portNum = 00; 
+//        if((apiCount == 0x03 && configSentPartCtr==0x03) || apiCount != 0x03 ){ //all other apis except if api is 3, then ctr has to be 3
+//          writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
+//        } 
+////        printRegisters(); // prints all to double check
+//     }
+//     //    checkAllPortMode();
+//  }
+//    
+// }
+    
+    //after loop; do what is said there sa port config segment
+    //set ports if output or input
+    //event triggered - set actuator port mode in actuator details
+    if(Serial.available()>0){
+    serialData = Serial.read(); // 1 byte
+    
+    if(serialData == 0xFF){ // serialhead found start reading
+      headerFound = true;
+    }
+    
+    if(headerFound){
+      serialBuffer[pos++] = serialData;
+    }
+    
+    if(serialData == 0xFE){
+      serialBuffer[pos] = 0xFE; //adds footer
+      
+      // newly init
+      if(serialHead == serialTail && isEmpty){
+        isEmpty = false;
+        for(byte x = 0x00; x < pos; x++){
+          //store data to perma queue
+          serialQueue[serialTail][x] = serialBuffer[x]; 
+        }
+        
+        pos = 0;
+        serialTail = serialTail + 0x01; // increment tail
+        headerFound = false;
+      }
+      
+      // serialHead == serialTail !empty //full queue
+      else if(serialHead == serialTail && !isEmpty){
+        Serial.println("Full Queue");
+        isFull = true;
+        printBuffer(serialQueue);
+        isService = true;
+        pos = 0;
+        
+      }
+      
+      else{//store data to perma queue
+        for(byte x = 0x00; x < pos; x++){
+          serialQueue[serialTail][x] = serialBuffer[x]; 
+          Serial.print(serialQueue[serialTail][x],HEX);
+        }
+        Serial.println();
+        pos = 0;
+        serialTail = serialTail + 0x01; //increment tail
+        headerFound = false;
+        if(serialTail == QUEUE_SIZE){
+          serialTail = 0x00;
+        }
+      }
+    }
+   }
+   else{
+    isService = true;
+   }
+  
+  if(isService){
+    Serial.println("Checking if queue is empty"); // this is a flooding message
+    isService = false;
+  }
+}
+
