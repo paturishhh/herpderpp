@@ -7,7 +7,6 @@ static byte serialBuffer[BUFFER_SIZE];
 //for queue
 byte serialHead = 0x00;
 byte serialTail = 0x00;
-//byte shiftCounter = 0x00;
 boolean isEmpty = true;
 boolean isService = false; // status to check serialQueue ; set only when no packet is received or queue is full
 boolean isFull = false; 
@@ -37,20 +36,7 @@ void printBuffer(){
   }
 }
 
-void positionCounter(byte data){ // position in serial queue
-  Serial.print("D: ");
-  Serial.println(data,HEX);
-  while((data & 0x01) != 0x01){
-//    shiftCounter = shiftCounter + 0x01;
-    data  = data >> 1;
-  }
-  Serial.print("S: ");
-//  Serial.println(shiftCounter,HEX);
-}
-
 void loop() {
-  // you can read one
-  //trying serialQueue
   static byte index = 0; //for queue
   static size_t pos = 0; //for buffer
   byte serialData; 
@@ -69,7 +55,6 @@ void loop() {
     if(serialData == 0xFE){
       serialBuffer[pos] = 0xFE; //adds footer
       
-      //check if header == tail and isempty 
       // newly init
       if(serialHead == serialTail && isEmpty){
         isEmpty = false;
@@ -77,10 +62,9 @@ void loop() {
           //store data to perma queue
           serialQueue[serialTail][x] = serialBuffer[x]; 
         }
-        // shift tail
-//        shiftCounter = 0x00;
+        
         pos = 0;
-        serialTail = serialTail + 0x01;
+        serialTail = serialTail + 0x01; // increment tail
         headerFound = false;
       }
       
@@ -91,8 +75,7 @@ void loop() {
         printBuffer();
         isService = true;
         pos = 0;
-//        shiftCounter = 0x00;
-
+        
         //testing purposes only
 //          head = head << 1; //moves head to next //deletes 1 slot away start at 0
 //          isEmpty = false;
@@ -101,26 +84,22 @@ void loop() {
 //          pos = 0;
       }
       
-      else{
+      else{//store data to perma queue
         for(byte x = 0x00; x < pos; x++){
-          //store data to perma queue
           serialQueue[serialTail][x] = serialBuffer[x]; 
           Serial.print(serialQueue[serialTail][x],HEX);
         }
         Serial.println();
-//        shiftCounter = 0x00;
-        Serial.print("H:");
-        Serial.println(serialHead);
-        Serial.print("T:");
-        Serial.println(serialTail);
+//        Serial.print("H:");
+//        Serial.println(serialHead);
+//        Serial.print("T:");
+//        Serial.println(serialTail);
         pos = 0;
-        // shift serialTail
-        serialTail = serialTail + 0x01;
+        serialTail = serialTail + 0x01; //increment tail
         headerFound = false;
         if(serialTail == QUEUE_SIZE){
           serialTail = 0x00;
         }
-        Serial.println("tis con");
       }
     }
   }
@@ -129,7 +108,7 @@ void loop() {
   }
   
   if(isService){
-//    Serial.println("Check if queue is empty"); // this is a flooding message
+    Serial.println("Checking if queue is empty"); // this is a flooding message
     isService = false;
   }
 }
