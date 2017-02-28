@@ -161,7 +161,7 @@ void loadConfig(){ //loads config file and applies it to the registers
 //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[25])));
 //    Serial.println(buffer); //error
     errorFlag |= temp;
-    Serial.println(errorFlag, HEX);
+//    Serial.println(errorFlag, HEX);
     //contact sink node
   }
   else{
@@ -296,7 +296,7 @@ void loadConfig(){ //loads config file and applies it to the registers
 //      Serial.println(buffer); //error
       byte temp = 0x08; 
       errorFlag |= 0x08; //setting error flag
-      Serial.println(errorFlag, HEX);
+//      Serial.println(errorFlag, HEX);
     }
   }
 }
@@ -786,7 +786,7 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         if((apiCount == 0x03 && configSentPartCtr==0x03) || apiCount != 0x03 ){ //all other apis except if api is 3, then ctr has to be 3
           writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
         } 
-        printRegisters(); // prints all to double check
+//        printRegisters(); // prints all to double check
      }
       
       if(data == 0xFE)
@@ -1095,11 +1095,8 @@ void loop(){
   static size_t pos = 0; //for buffer
   
   //Communication module - Receive
-     
-  //after loop; do what is said there sa port config segment
-  //set ports if output or input
-  //event triggered - set actuator port mode in actuator details
-  if(Serial.available()>0){
+
+  if(Serial.available()>0 && !isFull){
     serialData = Serial.read(); // 1 byte
   
     if(serialData == 0xFF){ // serialhead found start reading
@@ -1128,7 +1125,7 @@ void loop(){
       }
     
       // serialHead == serialTail !empty //full queue
-      else if(serialHead == serialTail && !isEmpty){
+      else if(isFull){
         Serial.println("Full Queue");
         isFull = true;
         printBuffer(serialQueue);
@@ -1142,14 +1139,24 @@ void loop(){
 //          Serial.print(serialQueue[serialTail][x],HEX);
         }
         
-        Serial.println();
+//        Serial.println();
         pos = 0;
-        serialTail = serialTail + 0x01; //increment tail
         headerFound = false;
-        
-        if(serialTail == QUEUE_SIZE){
+
+        byte temp = serialTail;
+
+        if (serialTail == QUEUE_SIZE-1 && !isFull){ //if max and 
           serialTail = 0x00;
+          if(serialHead == serialTail){
+            isFull = true;
+            serialTail = temp;
+          }
         }
+        else{
+          serialTail = serialTail + 0x01; //increment tail //check is full
+        }
+        Serial.print("T:");
+        Serial.println(serialTail,HEX);
       }
     }
  }
@@ -1162,14 +1169,29 @@ void loop(){
     isService = false;
 
     if(!isEmpty){
-      Serial.println("Yay you are not empty");
+//      Serial.println("not empty");
       retrieveSerialQueue(serialQueue, serialHead);
-      serialHead = serialHead + 0x01; // increment head
-      Serial.println(serialHead, HEX);
+      
+      //checking serialHead to be circular
+      if(serialHead < QUEUE_SIZE - 1)
+        serialHead = serialHead + 0x01; // increment head
+      else
+        serialHead = 0x00;
+      
+      if(serialHead == serialTail){ // empty
+        isEmpty = true;
+        isFull = false; 
+        serialHead = 0x00;
+        serialTail = 0x00;
+        Serial.println("tri");
+      }
       pos = 0;
+//      headerFound = false;
+      Serial.println(serialHead, HEX);
+      Serial.println(serialTail, HEX);
       
       //for testing
-      isEmpty = true;
+//      isEmpty = false;
     }
 
     else{
