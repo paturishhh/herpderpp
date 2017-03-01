@@ -18,6 +18,7 @@ int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
 byte errorFlag = 0x00; // bits correspond to an error
 byte logicalAddress = 0x00; //contains address of the network
 byte physicalAddress = 0x01; //unique address of the node (frodam 0-255) (source address)
+byte sinkAddress = 0x00; // specifically sink node in case in the future the nodes talk each other na
 byte destAddress = 0x00; //destination address (source address is set to destination address)
 byte sourceAddress = 0x00;
 byte configVersion = 0x00; //node config version
@@ -655,14 +656,14 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
       else if(segmentCounter == 0x0B){ //COMMAND PARAMETER FOR API == 3
         
         if (data == 0x00){ // Request keep alive message
-          commandValue = 0x01; 
+          commandValue = 0x00; 
           packetTypeFlag |= 0x04; //set packet type to node discovery 
           segmentCounter = 0xFF; // go to footer
         }
         if (data == 0x01){ //Network Config
           commandValue = 0x01;
           packetTypeFlag |= 0x04; //set packet type to node discovery 
-          segmentCounter = 0xFF; // go to footer
+          segmentCounter = 0x0E; // go to logical address
         }
         if (data == 0xFF){ // receive configuration
           packetTypeFlag |= 0x01; //set packet type to a startup config
@@ -706,7 +707,13 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
       }
       else if(segmentCounter == 0x0E){ //API == 3 GET CONFIG - logical address
         logicalAddress  = data;
-        segmentCounter = 0x0F; 
+
+        if(packetTypeFlag && 0x04 == 0x04){ // if node discovery - network config, go to sink node addr
+          segmentCounter = 0x16;
+        }
+        else{ // if requesting config
+          segmentCounter = 0x0F; 
+        }
       }
       else if(segmentCounter == 0x0F){ //GET CONFIG - physical
         physicalAddress = data;
@@ -802,6 +809,11 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         else{
           partCounter = partCounter | 0x01; // move to next
         }
+      }
+      else if(segmentCounter == 0x16){ // NODE DISCOVERY - NETWORK CONFIGURATION - SINK ADDR
+        sinkAddress = data;
+        packetTypeFlag = packetFlag & 0xFB; // turn off packet type flag for node discov
+        segmentCounter = 0xFF;
       }
       else if(segmentCounter == 0xFF && data == 0xFE){ // FOOTER
         strcpy_P(buffer, (char*)pgm_read_word(&(messages[16])));
@@ -1121,15 +1133,7 @@ void setup(){
 //    Serial.println(errorFlag, HEX);
 //  }
   
-  loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink node
-  //you cannot run write and load back to back coz you call sd.begin twice 
-//  printRegisters();
-
-
-  // to initialize timer
-//initializeTimer();
- }
-
+  loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
 void loop(){
   boolean wait = 0;
   byte attemptCounter; //for contacting the sink
@@ -1202,8 +1206,17 @@ void loop(){
       
       pos = 0;
 //      headerFound = false;
-      Serial.println(serialHead, HEX);
-      Serial.println(serialTail, HEX);
+//      Serial.println(serialHead, HEX);
+//      Serial.println(serialTail, HEX);
+      if((packetTypeFlag && 0x01) == 0x01){ // request startup config
+        
+      }
+      else if((packetTypeFlag && 0x02) == 0x02){ // node configuration
+        
+      }
+      else if((packetTypeFlag && 0x04) == 0x04){ // node discovery
+        Serial.println("@Disco");
+      }
       
     }
     else{
