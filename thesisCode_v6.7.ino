@@ -36,12 +36,11 @@ unsigned int actuatorValueOnDemandSegment[(int) PORT_COUNT]; // stores data to w
 unsigned int portValue[(int) PORT_COUNT]; //stores port values but in BCD
 unsigned int timerSegment[(int) PORT_COUNT]; //timer segment
 unsigned int eventSegment[(int) PORT_COUNT * 2]; //event segment - 24 slots (0-23(17h)) 0-B (if threshold mode) C-17 (if range mode)
-unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment
+unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment (event)
 byte segmentCounter = 0x00;  // counter for parsing the parts of the packet
 byte tempModeStorage = 0x00; // stores the port config 00-07
 byte portNum = 0x00;//parsing var
 byte partCounter = 0x00; //part of the data counter when receiving configs
-//byte actuatorPort = 0x00; //actuator port for event triggered
 byte commandValue = 0x00; // for api = 3, contains the command value
 byte checker = 0x00; // for api = 2 checker for threshold/range mode; api = 3 counter for receive (port num i think)
 
@@ -55,9 +54,20 @@ boolean isEmpty = true;
 boolean isService = false; // status to check serialQueue ; set only when no packet is received or queue is full
 boolean isFull = false; 
 
+//for packet queue
+//reuse headerFound
+byte packetQueue[QUEUE_SIZE][BUFFER_SIZE];
+byte packetBuffer[BUFFER_SIZE];
+byte packetQueueHead = 0x00;
+byte packetQueueTail = 0x00;
+boolean packetQisEmpty = true;
+boolean packetQisService = false;
+boolean packetQisFull = false;
+
+byte packetTypeFlag = 0x00; //determines the type of packet received
+
 volatile unsigned long timeCtr; // counter for overflows
 long portOverflowCounts [(int) PORT_COUNT]; //stores the overflow counters to be checked by interrupt
-
 
 //Messages used which would be saved to the program space (flash) to save space
 const char segmentBranch0[] PROGMEM = "@ PORT CONFIG SEGMENT";
@@ -372,15 +382,25 @@ void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // prints serialBuffer
   byte x = 0x00;
   byte halt = false;
   for(byte y = 0x00; y < QUEUE_SIZE; y++){
-    for(byte x = 0x00; x < BUFFER_SIZE; x++){  
-      while(!halt){
+    Serial.print(y);
+    Serial.print(":");
+    while(!halt){
+      if(temp[y][x] == 0xFE){
         Serial.print(temp[y][x],HEX);
-        if(temp[y][x] == 0xFE)
-          halt = true; 
+        halt = true; 
+      }
+      else{
+        Serial.print(temp[y][x],HEX);
+      }
+
+      if(x != BUFFER_SIZE)
         x = x + 0x01;
+      else{
+        halt = true;
       }
     }
     halt = false;
+    x = 0x00;
     Serial.println();
   }
 }
@@ -500,7 +520,7 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
   byte x = 0x00;
   byte halt = false;
   byte configSentPartCtr;
-  for(byte x = 0x00; x < BUFFER_SIZE; x++){  
+//  for(byte x = 0x00; x < BUFFER_SIZE; x++){  
     while(!halt){
       byte data = queue[head][x];
       if(data == 0xFF && segmentCounter == 0x00){
@@ -532,6 +552,9 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         }
       }
       else if(segmentCounter == 0x04){ // CONFIG VERSION IF API = 2
+       //sets packet type to node config
+       packetTypeFlag |= 0x02; 
+        
        if(configVersion <= data){ // if newer yung config version
         configVersion = data; //take it
         segmentCounter = 0x05; // check count
@@ -630,13 +653,19 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         }
       }
       else if(segmentCounter == 0x0B){ //COMMAND PARAMETER FOR API == 3
+        
         if (data == 0x00){ // Request keep alive message
-          commandValue = 0x01; // sets lsb to indicate request keep alive is there
-//          strcpy_P(buffer, (char*)pgm_read_word(&(messages[14])));
-//          Serial.println(buffer);
+          commandValue = 0x01; 
+          packetTypeFlag |= 0x04; //set packet type to node discovery 
+          segmentCounter = 0xFF; // go to footer
+        }
+        if (data == 0x01){ //Network Config
+          commandValue = 0x01;
+          packetTypeFlag |= 0x04; //set packet type to node discovery 
           segmentCounter = 0xFF; // go to footer
         }
         if (data == 0xFF){ // receive configuration
+          packetTypeFlag |= 0x01; //set packet type to a startup config
           commandValue = 0xFF; //sets 1st bit to indicate a config is coming
 //          strcpy_P(buffer, (char*)pgm_read_word(&(messages[34])));
 //          Serial.println(buffer);
@@ -789,12 +818,26 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
 //        printRegisters(); // prints all to double check
      }
       
-      if(data == 0xFE)
+      if(x == BUFFER_SIZE){
         halt = true; 
-      x = x + 0x01;
+      }
+      else{
+        x = x + 0x01;
+      }
+      
     }
-  }
+//  }
 }
+
+void initializePacket(byte pQueue[QUEUE_SIZE][BUFFER_SIZE]){ //adds necessary stuff at init; needs one part row
+  
+}
+
+void insertToPacket(){
+  
+}
+
+
 /************ Setters  *************/
 //USE CAUTION WHEN USING THIS.. I THINK TAMA NA NAMAN GINAGAWA NIYA
 void setEventNotif(int val){
@@ -1096,7 +1139,7 @@ void loop(){
   
   //Communication module - Receive
 
-  if(Serial.available()>0 && !isFull){
+  if(Serial.available()>0){
     serialData = Serial.read(); // 1 byte
   
     if(serialData == 0xFF){ // serialhead found start reading
@@ -1109,57 +1152,33 @@ void loop(){
   
     if(serialData == 0xFE){
       serialBuffer[pos] = 0xFE; //adds footer
+      Serial.print("T: ");
+      Serial.println(serialTail, HEX);
     
-      // newly init
-      if(serialHead == serialTail && isEmpty){
+      if(serialHead != ((serialTail + 0x01) % QUEUE_SIZE)){ // tail is producer
         isEmpty = false;
         
         for(byte x = 0x00; x < pos; x++){
           //store data to perma queue
           serialQueue[serialTail][x] = serialBuffer[x]; 
+          Serial.print(serialQueue[serialTail][x],HEX);
         }
-      
+        Serial.println();
+        printBuffer(serialQueue);
+        
         pos = 0;
-        serialTail = serialTail + 0x01; // increment tail
+        serialTail = (serialTail + 0x01) % QUEUE_SIZE; // increment tail
         headerFound = false;
       }
-    
-      // serialHead == serialTail !empty //full queue
-      else if(isFull){
+      else{
         Serial.println("Full Queue");
         isFull = true;
         printBuffer(serialQueue);
         isService = true;
         pos = 0;
       }
-    
-      else{//store data to perma queue
-        for(byte x = 0x00; x < pos; x++){
-          serialQueue[serialTail][x] = serialBuffer[x]; 
-//          Serial.print(serialQueue[serialTail][x],HEX);
-        }
-        
-//        Serial.println();
-        pos = 0;
-        headerFound = false;
-
-        byte temp = serialTail;
-
-        if (serialTail == QUEUE_SIZE-1 && !isFull){ //if max and 
-          serialTail = 0x00;
-          if(serialHead == serialTail){
-            isFull = true;
-            serialTail = temp;
-          }
-        }
-        else{
-          serialTail = serialTail + 0x01; //increment tail //check is full
-        }
-        Serial.print("T:");
-        Serial.println(serialTail,HEX);
-      }
     }
- }
+  }
   
   else{
     isService = true;
@@ -1169,31 +1188,24 @@ void loop(){
     isService = false;
 
     if(!isEmpty){
-//      Serial.println("not empty");
+      Serial.println("not empty");
+//      printBuffer(serialQueue);
       retrieveSerialQueue(serialQueue, serialHead);
       
-      //checking serialHead to be circular
-      if(serialHead < QUEUE_SIZE - 1)
-        serialHead = serialHead + 0x01; // increment head
-      else
-        serialHead = 0x00;
       
-      if(serialHead == serialTail){ // empty
+      if(serialHead != serialTail)
+        serialHead = (serialHead + 0x01) % QUEUE_SIZE; // increment head
+      else{
         isEmpty = true;
-        isFull = false; 
-        serialHead = 0x00;
-        serialTail = 0x00;
-        Serial.println("tri");
+        Serial.println("Queue is empty");
       }
+      
       pos = 0;
 //      headerFound = false;
       Serial.println(serialHead, HEX);
       Serial.println(serialTail, HEX);
       
-      //for testing
-//      isEmpty = false;
     }
-
     else{
 //      Serial.println("You are empty");
     }
