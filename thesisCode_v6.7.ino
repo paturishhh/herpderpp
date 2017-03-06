@@ -20,17 +20,20 @@ byte logicalAddress = 0x00; //contains address of the network
 byte physicalAddress = 0x01; //unique address of the node (frodam 0-255) (source address)
 byte sinkAddress = 0x00; // specifically sink node in case in the future the nodes talk each other na
 byte destAddress = 0x00; //destination address (source address is set to destination address)
-byte sourceAddress = 0x00;
+byte sourceAddress = 0x00; //when receiving packet
 byte configVersion = 0x00; //node config version
 byte maxAttempt = 0x03; //for contacting the sink
 boolean requestConfig = false; // checks if node is requesting config
 
 byte apiCount = 0x01; //API version
-byte commandCount = 0x00; //command being served
-byte commandCounter = 0x00; //commandCounter for commands; for receiving
-String packetReply = ""; //packet used to reply to node
-unsigned int eventNotif; //event triggered command notification
-unsigned int onDemandRegister; // if set, then there is an odm; 0-15
+byte commandCount = 0x00; //command being served (at retrieve)
+byte commandCounter = 0x00; //commandCounter for commands; for receiving (@ receive)
+byte packetCommandCounter = 0x00; //command counter where count will be placed @ packet
+byte packetPos = 0x05; //position of packet; default at command na
+
+unsigned int eventRegister = 0x0000; // if set, event happened; 0-15
+unsigned int onDemandRegister = 0x0000; // if set, then there is an odm; 0-15
+unsigned int timerRegister = 0x0000; //if set, there is timer triggered; 0 - 15
 
 byte portConfigSegment[(int) PORT_COUNT]; // contains port type, odm/event/time mode
 unsigned int actuatorValueOnDemandSegment[(int) PORT_COUNT]; // stores data to write on actuator if ODM
@@ -379,7 +382,7 @@ void writeConfig(){  // writes node configuration to SD card
   
 }
 /************* Utilities *************/
-void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // prints serialBuffer
+void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // you can remove the queue_Size and buffer size; prints serialBuffer
   byte x = 0x00;
   byte halt = false;
   for(byte y = 0x00; y < QUEUE_SIZE; y++){
@@ -517,13 +520,15 @@ void checkOtherCommands(){ // checks if there is still commands
   }
 }
 
-void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
+void retrieveSerialQueue(byte queue[], byte head){//  you can remove the queue_Size and buffer size; store to var from serial queue
   byte x = 0x00;
   byte halt = false;
   byte configSentPartCtr;
 //  for(byte x = 0x00; x < BUFFER_SIZE; x++){  
     while(!halt){
-      byte data = queue[head][x];
+//      Serial.print("SGM CTR: ");
+//      Serial.println(segmentCounter, HEX);
+      byte data = queue[x];
       if(data == 0xFF && segmentCounter == 0x00){
         segmentCounter = 0x01;
       }
@@ -635,8 +640,6 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         }
       }
       else if(segmentCounter == 0x0A){// ACTUATOR DETAILS
-//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[3])));
-//        Serial.println(buffer);
         setActuatorDetailSegment(portNum, data); 
         if(partCounter == 0x01){ // next part of actuator detail segment is found
           partCounter = 0x00; //reset part counter
@@ -654,22 +657,19 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         }
       }
       else if(segmentCounter == 0x0B){ //COMMAND PARAMETER FOR API == 3
-        
         if (data == 0x00){ // Request keep alive message
           commandValue = 0x00; 
           packetTypeFlag |= 0x04; //set packet type to node discovery 
-          segmentCounter = 0xFF; // go to footer
+          segmentCounter = 0x16; // go to footer
         }
-        if (data == 0x01){ //Network Config
-          commandValue = 0x01;
+        if (data == 0x02){ //Network Config
+          commandValue = 0x02;
           packetTypeFlag |= 0x04; //set packet type to node discovery 
           segmentCounter = 0x0E; // go to logical address
         }
         if (data == 0xFF){ // receive configuration
           packetTypeFlag |= 0x01; //set packet type to a startup config
           commandValue = 0xFF; //sets 1st bit to indicate a config is coming
-//          strcpy_P(buffer, (char*)pgm_read_word(&(messages[34])));
-//          Serial.println(buffer);
           segmentCounter = 0x0C; //check how many parts
         }
       }
@@ -691,9 +691,6 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         }
       }
       else if(segmentCounter == 0x0D){ // ODM - ACTUATOR SEGMENT
-//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
-//        Serial.print(buffer);
-//        Serial.println(data,HEX); 
         setActuatorValueOnDemandSegment(portNum, data);
 
         if(partCounter == 0x01){ // if last part
@@ -735,8 +732,6 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         }
       }
       else if(segmentCounter == 0x12){ // PORT CONFIG - ACUATOR VALUE ON DEMAND
-//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
-//        Serial.println(buffer);
         setActuatorValueOnDemandSegment(checker, data);
         if(partCounter == 0x01){ // if last part ng data
           if(checker != PORT_COUNT-1){
@@ -754,8 +749,6 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
         }
       }
       else if(segmentCounter == 0x13){ //PORT CONFIG - TIMER SEGMENT
-//        strcpy_P(buffer, (char*)pgm_read_word(&(messages[1])));
-//        Serial.println(buffer);
         setTimerSegment(checker, data);
         if(partCounter == 0x01){
           if(checker != PORT_COUNT -1){
@@ -812,7 +805,6 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
       }
       else if(segmentCounter == 0x16){ // NODE DISCOVERY - NETWORK CONFIGURATION - SINK ADDR
         sinkAddress = data;
-        packetTypeFlag = packetFlag & 0xFB; // turn off packet type flag for node discov
         segmentCounter = 0xFF;
       }
       else if(segmentCounter == 0xFF && data == 0xFE){ // FOOTER
@@ -841,20 +833,44 @@ void retrieveSerialQueue(byte queue[QUEUE_SIZE][BUFFER_SIZE], byte head){
 //  }
 }
 
-void initializePacket(byte pQueue[QUEUE_SIZE][BUFFER_SIZE]){ //adds necessary stuff at init; needs one part row
-  
+void initializePacket(byte pQueue[]){ // one row //adds necessary stuff at init; needs one part row
+//  sinkAddress = 0x00;// testing
+  pQueue[0] = 0xFF; // header 
+  pQueue[1] = physicalAddress; //source
+  pQueue[2] = sinkAddress; //destination ; assumes always sink node
+  pQueue[3] = 0x03; //api used to reply is currently 3 
 }
 
-void insertToPacket(){
-  
+void insertToPacket(byte pQueue[], byte command){ // for port data
+  //adds count for each command
+  //checks if equal to buffersize - 2 (coz may footer pa)
+  pQueue[5] = command; //command
+  //other parameters depend on command
+  if(command == 0xF7){
+    packetPos = packetPos + 0x01; 
+  }
+  packetPos = packetPos + 0x01; 
+  packetCommandCounter = packetCommandCounter + 0x01; //increment count
+}
+
+void formatReplyPacket(byte pQueue[], byte command){ // format reply with command param only
+  pQueue[4] = command;
+  packetPos = 0x05;
+}
+
+ //insert count @ packet
+//pQueue[4] = (packetCommandCounter - 0x01);
+//if port data pinapadala
+//reset count
+//packetCommandCounter = 0x00; // reset counter
+//packetPos = 0x05; // reset to put command 
+void closePacket(byte pQueue[]){
+  pQueue[packetPos] = 0xFE; //footer
+  packetQueueTail = (packetQueueTail + 0x01) % QUEUE_SIZE; // point to next in queue
 }
 
 
 /************ Setters  *************/
-//USE CAUTION WHEN USING THIS.. I THINK TAMA NA NAMAN GINAGAWA NIYA
-void setEventNotif(int val){
-  eventNotif = eventNotif | val;
-}
 
 void setPortConfigSegmentInit(byte portNum, char portDetails){ //when initializing //CHANGED FROM INT
   byte tempPort = 0x00;
@@ -876,7 +892,7 @@ void setPortConfigSegment(byte portNum, byte portDetails){
 void setPortValue(int portNum, int val){
   portValue[portNum] = val;
 }
-
+                
 void setTimerSegment(byte portNum, int val){  // BYTE FROM INT; partCounter is a global var
   if(partCounter==0x00){
 //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[7])));
@@ -1134,6 +1150,7 @@ void setup(){
 //  }
   
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
+}
 void loop(){
   boolean wait = 0;
   byte attemptCounter; //for contacting the sink
@@ -1168,7 +1185,7 @@ void loop(){
           Serial.print(serialQueue[serialTail][x],HEX);
         }
         Serial.println();
-        printBuffer(serialQueue);
+//        printBuffer(serialQueue);
         
         pos = 0;
         serialTail = (serialTail + 0x01) % QUEUE_SIZE; // increment tail
@@ -1192,30 +1209,42 @@ void loop(){
     isService = false;
 
     if(!isEmpty){
-      Serial.println("not empty");
+//      Serial.println("not empty");
 //      printBuffer(serialQueue);
-      retrieveSerialQueue(serialQueue, serialHead);
+      retrieveSerialQueue(serialQueue[serialHead], serialHead);
       
-      
+      pos = 0;
+      Serial.print("packetT: ");
+      Serial.println(packetTypeFlag, HEX);
+//      headerFound = false;
+//      Serial.println(serialHead, HEX);
+//      Serial.println(serialTail, HEX);
+      if((packetTypeFlag & 0x01) == 0x01){ // request startup config
+        
+      }
+      else if((packetTypeFlag & 0x02) == 0x02){ // node configuration
+        
+      }
+      else if((packetTypeFlag & 0x04) == 0x04){ // node discovery
+        if(commandValue == 0x00){
+          initializePacket(packetQueue[packetQueueTail]);
+          formatReplyPacket(packetQueue[packetQueueTail], 0x01);
+          closePacket(packetQueue[packetQueueTail]);
+          printBuffer(packetQueue);
+        }
+        else if(commandValue == 0x02){
+          initializePacket(packetQueue[packetQueueTail]);
+          formatReplyPacket(packetQueue[packetQueueTail], 0x03);
+          closePacket(packetQueue[packetQueueTail]);
+          printBuffer(packetQueue);
+        }
+        packetTypeFlag = packetTypeFlag & 0xFB; // turn off packet type flag for node discov
+      }
       if(serialHead != serialTail)
         serialHead = (serialHead + 0x01) % QUEUE_SIZE; // increment head
       else{
         isEmpty = true;
         Serial.println("Queue is empty");
-      }
-      
-      pos = 0;
-//      headerFound = false;
-//      Serial.println(serialHead, HEX);
-//      Serial.println(serialTail, HEX);
-      if((packetTypeFlag && 0x01) == 0x01){ // request startup config
-        
-      }
-      else if((packetTypeFlag && 0x02) == 0x02){ // node configuration
-        
-      }
-      else if((packetTypeFlag && 0x04) == 0x04){ // node discovery
-        Serial.println("@Disco");
       }
       
     }
