@@ -164,6 +164,42 @@ void triggerOnDemand(){
      
 }
 
+void initializePacket(byte pQueue[]){ // one row //adds necessary stuff at init; needs one part row
+//  sinkAddress = 0x00;// testing
+  pQueue[0] = 0xFF; // header 
+  pQueue[1] = physicalAddress; //source
+  pQueue[2] = sinkAddress; //destination ; assumes always sink node
+  pQueue[3] = 0x03; //api used to reply is currently 3 
+}
+
+void insertToPacket(byte pQueue[], byte command){ // for port data
+  //adds count for each command
+  //checks if equal to buffersize - 2 (coz may footer pa)
+  pQueue[5] = command; //command
+  //other parameters depend on command
+  if(command == 0xF7){
+    packetPos = packetPos + 0x01; 
+  }
+  packetPos = packetPos + 0x01; 
+  packetCommandCounter = packetCommandCounter + 0x01; //increment count
+}
+
+void formatReplyPacket(byte pQueue[], byte command){ // format reply with command param only
+  pQueue[4] = command;
+  packetPos = 0x05;
+}
+
+ //insert count @ packet
+//pQueue[4] = (packetCommandCounter - 0x01);
+//if port data pinapadala
+//reset count
+//packetCommandCounter = 0x00; // reset counter
+//packetPos = 0x05; // reset to put command 
+void closePacket(byte pQueue[]){
+  pQueue[packetPos] = 0xFE; //footer
+  packetQueueTail = (packetQueueTail + 0x01) % QUEUE_SIZE; // point to next in queue
+}
+
 void loadConfig(){ //loads config file and applies it to the registers
   byte fileCounter = 0x00;
   byte index = 0x00;
@@ -171,16 +207,15 @@ void loadConfig(){ //loads config file and applies it to the registers
   byte loByte = 0x00;
   byte temp = 0x01; //for setting error flag
   
-  if(!SD.begin(CS_PIN)){//in case sd card is not read
+  if(!SD.begin(CS_PIN)){//in case sd card is not init
 //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[25])));
 //    Serial.println(buffer); //error
     errorFlag |= temp;
-//    Serial.println(errorFlag, HEX);
     //contact sink node
   }
   else{
     File configFile = SD.open("conf.log");
-    if(configFile){ // check if exists, if not then no sd card
+    if(configFile){ // check if exists, if not then no file
       while(configFile.available()){
         int fileTemp = configFile.read();
         //reads the file per byte, in the case of the int (2 bytes) it is divided into 2 parts, hiByte and loByte.
@@ -301,16 +336,25 @@ void loadConfig(){ //loads config file and applies it to the registers
           }
          }
     }
+
+      // to inform sink node of successful loadup
+      initializePacket(packetQueue[packetQueueHead]);
+      formatReplyPacket(packetQueue[packetQueueHead], 0xFC); 
+      closePacket(packetQueue[packetQueueHead]);
+      printBuffer(packetQueue);
+      
       configFile.close();
       initializeTimer();
       calculateOverflow();
     }
-    else{
-//      strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
-//      Serial.println(buffer); //error
-      byte temp = 0x08; 
-      errorFlag |= 0x08; //setting error flag
-//      Serial.println(errorFlag, HEX);
+    else{//cannot access sd card/file not found
+
+      //request config from sink node
+      requestConfig = true;
+      intializePacket(packetQueue[packetQueueTail]);
+      formatReplyPacket(packetQueue[packetQueueTail], 0xFE);
+      closePacket(packetQueue[packetQueueTail]);
+      printBuffer(packetQueue);
     }
   }
 }
@@ -386,8 +430,6 @@ void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // you can remove the queu
   byte x = 0x00;
   byte halt = false;
   for(byte y = 0x00; y < QUEUE_SIZE; y++){
-    Serial.print(y);
-    Serial.print(":");
     while(!halt){
       if(temp[y][x] == 0xFE){
         Serial.print(temp[y][x],HEX);
@@ -816,7 +858,7 @@ void retrieveSerialQueue(byte queue[], byte head){//  you can remove the queue_S
         checker = 00;
         partCounter = 00;
         portNum = 00; 
-        if((apiCount == 0x03 && configSentPartCtr==0x03) || apiCount != 0x03 ){ //all other apis except if api is 3, then ctr has to be 3
+        if((apiCount == 0x03 && configSentPartCtr==0x03) || apiCount != 0x03){ //all other apis except if api is 3, then ctr has to be 3
           writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
         } 
 //        printRegisters(); // prints all to double check
@@ -832,43 +874,6 @@ void retrieveSerialQueue(byte queue[], byte head){//  you can remove the queue_S
     }
 //  }
 }
-
-void initializePacket(byte pQueue[]){ // one row //adds necessary stuff at init; needs one part row
-//  sinkAddress = 0x00;// testing
-  pQueue[0] = 0xFF; // header 
-  pQueue[1] = physicalAddress; //source
-  pQueue[2] = sinkAddress; //destination ; assumes always sink node
-  pQueue[3] = 0x03; //api used to reply is currently 3 
-}
-
-void insertToPacket(byte pQueue[], byte command){ // for port data
-  //adds count for each command
-  //checks if equal to buffersize - 2 (coz may footer pa)
-  pQueue[5] = command; //command
-  //other parameters depend on command
-  if(command == 0xF7){
-    packetPos = packetPos + 0x01; 
-  }
-  packetPos = packetPos + 0x01; 
-  packetCommandCounter = packetCommandCounter + 0x01; //increment count
-}
-
-void formatReplyPacket(byte pQueue[], byte command){ // format reply with command param only
-  pQueue[4] = command;
-  packetPos = 0x05;
-}
-
- //insert count @ packet
-//pQueue[4] = (packetCommandCounter - 0x01);
-//if port data pinapadala
-//reset count
-//packetCommandCounter = 0x00; // reset counter
-//packetPos = 0x05; // reset to put command 
-void closePacket(byte pQueue[]){
-  pQueue[packetPos] = 0xFE; //footer
-  packetQueueTail = (packetQueueTail + 0x01) % QUEUE_SIZE; // point to next in queue
-}
-
 
 /************ Setters  *************/
 
@@ -1173,8 +1178,8 @@ void loop(){
   
     if(serialData == 0xFE){
       serialBuffer[pos] = 0xFE; //adds footer
-      Serial.print("T: ");
-      Serial.println(serialTail, HEX);
+//      Serial.print("T: ");
+//      Serial.println(serialTail, HEX);
     
       if(serialHead != ((serialTail + 0x01) % QUEUE_SIZE)){ // tail is producer
         isEmpty = false;
@@ -1182,9 +1187,9 @@ void loop(){
         for(byte x = 0x00; x < pos; x++){
           //store data to perma queue
           serialQueue[serialTail][x] = serialBuffer[x]; 
-          Serial.print(serialQueue[serialTail][x],HEX);
+//          Serial.print(serialQueue[serialTail][x],HEX);
         }
-        Serial.println();
+//        Serial.println();
 //        printBuffer(serialQueue);
         
         pos = 0;
@@ -1192,7 +1197,7 @@ void loop(){
         headerFound = false;
       }
       else{
-        Serial.println("Full Queue");
+//        Serial.println("Full Queue");
         isFull = true;
         printBuffer(serialQueue);
         isService = true;
@@ -1214,8 +1219,6 @@ void loop(){
       retrieveSerialQueue(serialQueue[serialHead], serialHead);
       
       pos = 0;
-      Serial.print("packetT: ");
-      Serial.println(packetTypeFlag, HEX);
 //      headerFound = false;
 //      Serial.println(serialHead, HEX);
 //      Serial.println(serialTail, HEX);
@@ -1230,21 +1233,21 @@ void loop(){
           initializePacket(packetQueue[packetQueueTail]);
           formatReplyPacket(packetQueue[packetQueueTail], 0x01);
           closePacket(packetQueue[packetQueueTail]);
-          printBuffer(packetQueue);
         }
         else if(commandValue == 0x02){
           initializePacket(packetQueue[packetQueueTail]);
           formatReplyPacket(packetQueue[packetQueueTail], 0x03);
           closePacket(packetQueue[packetQueueTail]);
-          printBuffer(packetQueue);
         }
         packetTypeFlag = packetTypeFlag & 0xFB; // turn off packet type flag for node discov
       }
+      
+      printBuffer(packetQueue);
       if(serialHead != serialTail)
         serialHead = (serialHead + 0x01) % QUEUE_SIZE; // increment head
       else{
         isEmpty = true;
-        Serial.println("Queue is empty");
+//        Serial.println("Queue is empty");
       }
       
     }
