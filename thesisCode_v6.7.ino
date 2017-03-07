@@ -22,7 +22,9 @@ byte sinkAddress = 0x00; // specifically sink node in case in the future the nod
 byte destAddress = 0x00; //destination address (source address is set to destination address)
 byte sourceAddress = 0x00; //when receiving packet
 byte configVersion = 0x00; //node config version
+volatile byte attemptCounter = 0x00; //attempts count for contacting sink
 byte maxAttempt = 0x03; //for contacting the sink
+unsigned int timeoutVal = 0x2005; //5 seconds
 boolean requestConfig = false; // checks if node is requesting config
 
 byte apiCount = 0x01; //API version
@@ -71,7 +73,7 @@ boolean packetQisFull = false;
 byte packetTypeFlag = 0x00; //determines the type of packet received
 
 volatile unsigned long timeCtr; // counter for overflows
-long portOverflowCounts [(int) PORT_COUNT]; //stores the overflow counters to be checked by interrupt
+long portOverflowCount [(int) PORT_COUNT + 0x01]; //stores the overflow counters to be checked by interrupt; last one is for timeout
 
 //Messages used which would be saved to the program space (flash) to save space
 const char segmentBranch0[] PROGMEM = "@ PORT CONFIG SEGMENT";
@@ -189,12 +191,38 @@ void formatReplyPacket(byte pQueue[], byte command){ // format reply with comman
   packetPos = 0x05;
 }
 
+void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // you can remove the queue_Size and buffer size; prints serialBuffer
+  byte x = 0x00;
+  byte halt = false;
+  for(byte y = 0x00; y < QUEUE_SIZE; y++){
+    while(!halt){
+      if(temp[y][x] == 0xFE){
+        Serial.print(temp[y][x],HEX);
+        halt = true; 
+      }
+      else{
+        Serial.print(temp[y][x],HEX);
+      }
+
+      if(x != BUFFER_SIZE)
+        x = x + 0x01;
+      else{
+        halt = true;
+      }
+    }
+    halt = false;
+    x = 0x00;
+    Serial.println();
+  }
+}
+ 
  //insert count @ packet
 //pQueue[4] = (packetCommandCounter - 0x01);
 //if port data pinapadala
 //reset count
 //packetCommandCounter = 0x00; // reset counter
 //packetPos = 0x05; // reset to put command 
+
 void closePacket(byte pQueue[]){
   pQueue[packetPos] = 0xFE; //footer
   packetQueueTail = (packetQueueTail + 0x01) % QUEUE_SIZE; // point to next in queue
@@ -208,13 +236,12 @@ void loadConfig(){ //loads config file and applies it to the registers
   byte temp = 0x01; //for setting error flag
   
   if(!SD.begin(CS_PIN)){//in case sd card is not init
-//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[25])));
-//    Serial.println(buffer); //error
+    strcpy_P(buffer, (char*)pgm_read_word(&(messages[25])));
+    Serial.println(buffer); //error
     errorFlag |= temp;
-    //contact sink node
   }
   else{
-    File configFile = SD.open("conf.log");
+    File configFile = SD.open("coaa.log");
     if(configFile){ // check if exists, if not then no file
       while(configFile.available()){
         int fileTemp = configFile.read();
@@ -339,20 +366,23 @@ void loadConfig(){ //loads config file and applies it to the registers
 
       // to inform sink node of successful loadup
       initializePacket(packetQueue[packetQueueHead]);
-      formatReplyPacket(packetQueue[packetQueueHead], 0xFC); 
+      formatReplyPacket(packetQueue[packetQueueHead], 0x0B); 
       closePacket(packetQueue[packetQueueHead]);
       printBuffer(packetQueue);
       
       configFile.close();
       initializeTimer();
-      calculateOverflow();
     }
     else{//cannot access sd card/file not found
 
       //request config from sink node
+      Serial.println("Requesting");
       requestConfig = true;
-      intializePacket(packetQueue[packetQueueTail]);
-      formatReplyPacket(packetQueue[packetQueueTail], 0xFE);
+      calculateOverflow(timeoutVal, PORT_COUNT); // last value of array is for timeout
+      initializeTimer();
+      
+      initializePacket(packetQueue[packetQueueTail]);
+      formatReplyPacket(packetQueue[packetQueueTail], 0x0D);
       closePacket(packetQueue[packetQueueTail]);
       printBuffer(packetQueue);
     }
@@ -426,30 +456,6 @@ void writeConfig(){  // writes node configuration to SD card
   
 }
 /************* Utilities *************/
-void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // you can remove the queue_Size and buffer size; prints serialBuffer
-  byte x = 0x00;
-  byte halt = false;
-  for(byte y = 0x00; y < QUEUE_SIZE; y++){
-    while(!halt){
-      if(temp[y][x] == 0xFE){
-        Serial.print(temp[y][x],HEX);
-        halt = true; 
-      }
-      else{
-        Serial.print(temp[y][x],HEX);
-      }
-
-      if(x != BUFFER_SIZE)
-        x = x + 0x01;
-      else{
-        halt = true;
-      }
-    }
-    halt = false;
-    x = 0x00;
-    Serial.println();
-  }
-}
 
 void printRegisters(){ // prints all variables stored in the sd card
   strcpy_P(buffer, (char*)pgm_read_word(&(messages[27])));
@@ -1007,13 +1013,14 @@ void setActuatorValueOnDemandSegment(byte portNum, int val){
   }
 }
 
-void calculateOverflow(){
+void calculateOverflow(unsigned int tempTime, byte portOverflowIndex){
    //if set yung timerRegister (set when may timeBased)
   //do this to timeSegment[bit that was set]
   //stop timer ah
   
   //convert time to seconds store to realTime
-  unsigned int tempTime = 0x1100; //sample data ; 1.5hrs
+  Serial.print("In time: ");
+  Serial.println(tempTime, HEX);
   byte timeUnit = tempTime >> 12; // checks which unit 
   unsigned int timeKeeper = tempTime & ((1 << 12)-1); // get time only masking it
   //convert bcd to dec
@@ -1057,9 +1064,10 @@ void calculateOverflow(){
   else{
     overflowCount = totalTicks/pow(2, 8); //8 coz timer 2 has 8 bits
   }
+  portOverflowCount[portOverflowIndex] = overflowCount;
  
-//  Serial.print("OFC: ");
-//  Serial.println(overflowCount);
+  Serial.print("OFC: ");
+  Serial.println(portOverflowCount[portOverflowIndex]);
 
   
   //check overflowCount if reached @ INTERRUPT
@@ -1101,6 +1109,11 @@ ISR(TIMER2_OVF_vect){
 //    Serial.println("0.5sec");
     digitalWrite(7, digitalRead(7)^1);
   }
+  if((timeCtr % portOverflowCount[PORT_COUNT]) == 0 && (requestConfig == true) && (portOverflowCount[PORT_COUNT] !=0)){ 
+    //if it reached timeout and requestConfig is set and it is not zero
+    attemptCounter = attemptCounter + 0x01; // increment counter
+    Serial.println("plus");
+  }
 }
 
 void initializeTimer(){
@@ -1141,7 +1154,7 @@ void setup(){
   memset(timerSegment,0,sizeof(timerSegment)); 
   memset(eventSegment,0,sizeof(eventSegment)); 
   memset(actuatorDetailSegment,0,sizeof(actuatorDetailSegment)); 
-  memset(portOverflowCounts, 0, sizeof(portOverflowCounts));
+  memset(portOverflowCount, 0, sizeof(portOverflowCount));
   memset(serialBuffer,0x00, sizeof(serialBuffer));
   memset(serialQueue, 0x00, sizeof(serialQueue));
 
@@ -1242,7 +1255,7 @@ void loop(){
         packetTypeFlag = packetTypeFlag & 0xFB; // turn off packet type flag for node discov
       }
       
-      printBuffer(packetQueue);
+//      printBuffer(packetQueue);
       if(serialHead != serialTail)
         serialHead = (serialHead + 0x01) % QUEUE_SIZE; // increment head
       else{
