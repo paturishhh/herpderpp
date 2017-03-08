@@ -11,7 +11,8 @@
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
-#define QUEUE_SIZE 0x08 // Queue for packet and serial
+#define PACKET_QUEUE_SIZE 0x0A // Queue for packet
+#define SERIAL_QUEUE_SIZE 0x08 // Queue for serial
 #define BUFFER_SIZE 0x10 // bytes queue will hold
 
 int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
@@ -24,6 +25,7 @@ byte sourceAddress = 0x00; //when receiving packet
 byte configVersion = 0x00; //node config version
 volatile byte attemptCounter = 0x00; //attempts count for contacting sink
 byte maxAttempt = 0x03; //for contacting the sink
+
 unsigned int timeoutVal = 0x2005; //5 seconds
 boolean requestConfig = false; // checks if node is requesting config
 
@@ -51,7 +53,7 @@ byte commandValue = 0x00; // for api = 3, contains the command value
 byte checker = 0x00; // for api = 2 checker for threshold/range mode; api = 3 counter for receive (port num i think)
 
 boolean headerFound = false;
-byte serialQueue[QUEUE_SIZE][BUFFER_SIZE];
+byte serialQueue[SERIAL_QUEUE_SIZE][BUFFER_SIZE];
 byte serialBuffer[BUFFER_SIZE];
 //for serial queue
 byte serialHead = 0x00;
@@ -62,8 +64,8 @@ boolean isFull = false;
 
 //for packet queue
 //reuse headerFound
-byte packetQueue[QUEUE_SIZE][BUFFER_SIZE];
-byte packetBuffer[BUFFER_SIZE];
+byte packetQueue[PACKET_QUEUE_SIZE][BUFFER_SIZE];
+//byte packetBuffer[BUFFER_SIZE];
 byte packetQueueHead = 0x00;
 byte packetQueueTail = 0x00;
 boolean packetQisEmpty = true;
@@ -191,10 +193,10 @@ void formatReplyPacket(byte pQueue[], byte command){ // format reply with comman
   packetPos = 0x05;
 }
 
-void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // you can remove the queue_Size and buffer size; prints serialBuffer
+void printBuffer(byte temp[][BUFFER_SIZE], byte queueSize){ // you can remove the queue_Size and buffer size; prints serialBuffer
   byte x = 0x00;
   byte halt = false;
-  for(byte y = 0x00; y < QUEUE_SIZE; y++){
+  for(byte y = 0x00; y < queueSize; y++){
     while(!halt){
       if(temp[y][x] == 0xFE){
         Serial.print(temp[y][x],HEX);
@@ -225,7 +227,7 @@ void printBuffer(byte temp[QUEUE_SIZE][BUFFER_SIZE]){ // you can remove the queu
 
 void closePacket(byte pQueue[]){
   pQueue[packetPos] = 0xFE; //footer
-  packetQueueTail = (packetQueueTail + 0x01) % QUEUE_SIZE; // point to next in queue
+  packetQueueTail = (packetQueueTail + 0x01) % PACKET_QUEUE_SIZE; // point to next in queue
 }
 
 void loadConfig(){ //loads config file and applies it to the registers
@@ -368,7 +370,7 @@ void loadConfig(){ //loads config file and applies it to the registers
       initializePacket(packetQueue[packetQueueHead]);
       formatReplyPacket(packetQueue[packetQueueHead], 0x0B); 
       closePacket(packetQueue[packetQueueHead]);
-      printBuffer(packetQueue);
+      printBuffer(packetQueue, PACKET_QUEUE_SIZE);
       
       configFile.close();
       initializeTimer();
@@ -384,7 +386,7 @@ void loadConfig(){ //loads config file and applies it to the registers
       initializePacket(packetQueue[packetQueueTail]);
       formatReplyPacket(packetQueue[packetQueueTail], 0x0D);
       closePacket(packetQueue[packetQueueTail]);
-      printBuffer(packetQueue);
+      printBuffer(packetQueue, PACKET_QUEUE_SIZE);
     }
   }
 }
@@ -455,6 +457,11 @@ void writeConfig(){  // writes node configuration to SD card
 //  }
   
 }
+
+void sendPacketQueue(){
+  
+}
+
 /************* Utilities *************/
 
 void printRegisters(){ // prints all variables stored in the sd card
@@ -1024,7 +1031,8 @@ void calculateOverflow(unsigned int tempTime, byte portOverflowIndex){
   byte timeUnit = tempTime >> 12; // checks which unit 
   unsigned int timeKeeper = tempTime & ((1 << 12)-1); // get time only masking it
   //convert bcd to dec
-  long timeTemp = bcd2dec(timeKeeper); //number in seconds
+//  long timeTemp = bcd2dec(timeKeeper); //number in seconds
+  long timeTemp = bcdToDecimal(timeKeeper);
   long realTime = 0x00; //32 bits ; max is 24hrs 86400 seconds
   float timeMS = 0.000;
 
@@ -1089,6 +1097,17 @@ long bcd2dec(unsigned int nTime){
   return temp;
 }
 
+unsigned int bcdToDecimal(unsigned int nTime){ //returns unsigned int to save space
+  unsigned int temp = 0;
+  //999
+  temp = ((nTime>>8)%16);
+  temp *= 10;
+  temp += ((nTime>>4)%16);
+  temp *= 10;
+  temp += (nTime %16);
+  return temp;
+}
+
 ISR(TIMER2_OVF_vect){
   timeCtr++;
 //  Serial.println(timeCtr);
@@ -1112,7 +1131,6 @@ ISR(TIMER2_OVF_vect){
   if((timeCtr % portOverflowCount[PORT_COUNT]) == 0 && (requestConfig == true) && (portOverflowCount[PORT_COUNT] !=0)){ 
     //if it reached timeout and requestConfig is set and it is not zero
     attemptCounter = attemptCounter + 0x01; // increment counter
-    Serial.println("plus");
   }
 }
 
@@ -1194,7 +1212,7 @@ void loop(){
 //      Serial.print("T: ");
 //      Serial.println(serialTail, HEX);
     
-      if(serialHead != ((serialTail + 0x01) % QUEUE_SIZE)){ // tail is producer
+      if(serialHead != ((serialTail + 0x01) % SERIAL_QUEUE_SIZE)){ // tail is producer
         isEmpty = false;
         
         for(byte x = 0x00; x < pos; x++){
@@ -1206,13 +1224,13 @@ void loop(){
 //        printBuffer(serialQueue);
         
         pos = 0;
-        serialTail = (serialTail + 0x01) % QUEUE_SIZE; // increment tail
+        serialTail = (serialTail + 0x01) % SERIAL_QUEUE_SIZE; // increment tail
         headerFound = false;
       }
       else{
 //        Serial.println("Full Queue");
         isFull = true;
-        printBuffer(serialQueue);
+        printBuffer(serialQueue, SERIAL_QUEUE_SIZE);
         isService = true;
         pos = 0;
       }
@@ -1256,8 +1274,9 @@ void loop(){
       }
       
 //      printBuffer(packetQueue);
+
       if(serialHead != serialTail)
-        serialHead = (serialHead + 0x01) % QUEUE_SIZE; // increment head
+        serialHead = (serialHead + 0x01) % SERIAL_QUEUE_SIZE; // increment head
       else{
         isEmpty = true;
 //        Serial.println("Queue is empty");
