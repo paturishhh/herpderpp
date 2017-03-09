@@ -198,7 +198,7 @@ void formatReplyPacket(byte pQueue[], byte command) { // format reply with comma
   packetPos = 0x05;
 }
 
-void printBuffer(byte temp[][BUFFER_SIZE], byte queueSize) { // you can remove the queue_Size and buffer size; prints serialBuffer
+void printQueue(byte temp[][BUFFER_SIZE], byte queueSize) { // you can remove the queue_Size and buffer size; prints serialBuffer
   byte x = 0x00;
   byte halt = false;
   for (byte y = 0x00; y < queueSize; y++) {
@@ -223,6 +223,26 @@ void printBuffer(byte temp[][BUFFER_SIZE], byte queueSize) { // you can remove t
   }
 }
 
+void printBuffer(byte temp[]){
+  byte x = 0x00;
+  byte halt = false;
+  while (!halt) {
+      if (temp[x] == 0xFE) {
+        Serial.print(temp[x], HEX);
+        halt = true;
+      }
+      else {
+        Serial.print(temp[x], HEX);
+      }
+
+      if (x != BUFFER_SIZE)
+        x = x + 0x01;
+      else {
+        halt = true;
+      }
+  }
+  Serial.println();
+}
 //insert count @ packet
 //pQueue[4] = (packetCommandCounter - 0x01);
 //if port data pinapadala
@@ -410,7 +430,7 @@ void loadConfig() { //loads config file and applies it to the registers
       initializePacket(packetQueue[packetQueueTail]);
       formatReplyPacket(packetQueue[packetQueueTail], 0x0D);
       closePacket(packetQueue[packetQueueTail]);
-      printBuffer(packetQueue, PACKET_QUEUE_SIZE);
+      printQueue(packetQueue, PACKET_QUEUE_SIZE);
     }
   }
 }
@@ -491,7 +511,13 @@ void writeConfig() { // writes node configuration to SD card
 }
 
 void sendPacketQueue() {
+  
+  while (packetQueueHead != packetQueueTail){
+      printBuffer(packetQueue[packetQueueHead]);
+      packetQueueHead = (packetQueueHead + 0x01) % PACKET_QUEUE_SIZE; // increment head
 
+  }
+  packetQisEmpty = true;
 }
 
 /************* Utilities *************/
@@ -1300,7 +1326,6 @@ void loop() {
   static size_t pos = 0; //for buffer
 
   //Communication module - Receive
-
   if (Serial.available() > 0) {
     serialData = Serial.read(); // 1 byte
 
@@ -1335,7 +1360,7 @@ void loop() {
       else {
         //        Serial.println("Full Queue");
         isFull = true;
-        printBuffer(serialQueue, SERIAL_QUEUE_SIZE);
+        printQueue(serialQueue, SERIAL_QUEUE_SIZE);
         isService = true;
         pos = 0;
       }
@@ -1369,6 +1394,7 @@ void loop() {
           initializePacket(packetQueue[packetQueueTail]);
           formatReplyPacket(packetQueue[packetQueueTail], 0x01);
           closePacket(packetQueue[packetQueueTail]);
+          sendPacketQueue();
         }
         else if (commandValue == 0x02) {// Network Config
           initializePacket(packetQueue[packetQueueTail]);
