@@ -14,7 +14,8 @@
 #define PACKET_QUEUE_SIZE 0x0A // Queue for packet
 #define SERIAL_QUEUE_SIZE 0x08 // Queue for serial
 #define BUFFER_SIZE 0x1F // bytes queue will hold
-#define MAX_CONFIG_PART 0x05
+#define MAX_CONFIG_PART 0x05 // receiving config
+#define MAX_ATTEMPT 0x03 // contacting sink
 
 int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
 byte errorFlag = 0x00; // bits correspond to an error
@@ -25,7 +26,8 @@ byte destAddress = 0x00; //destination address (source address is set to destina
 byte sourceAddress = 0x00; //when receiving packet
 byte configVersion = 0x00; //node config version
 volatile byte attemptCounter = 0x00; //attempts count for contacting sink
-byte maxAttempt = 0x03; //for contacting the sink
+volatile byte attemptIsSet = false; 
+//byte maxAttempt = 0x03; //for contacting the sink
 
 unsigned int timeoutVal = 0x2005; //5 seconds
 boolean requestConfig = false; // checks if node is requesting config
@@ -268,7 +270,7 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("conf.log");
+    File configFile = SD.open("coaa.log");
     if (configFile) { // check if exists, if not then no file
       while (configFile.available()) {
         int fileTemp = configFile.read();
@@ -409,7 +411,7 @@ void loadConfig() { //loads config file and applies it to the registers
           }
         }
       }
-      printRegisters();
+//      printRegisters();
       // to inform sink node of successful loadup
       initializePacket(packetQueue[packetQueueHead]);
       formatReplyPacket(packetQueue[packetQueueHead], 0x0B);
@@ -422,15 +424,19 @@ void loadConfig() { //loads config file and applies it to the registers
     else { //cannot access sd card/file not found
 
       //request config from sink node
-      Serial.println("Requesting");
       requestConfig = true;
-      calculateOverflow(timeoutVal, PORT_COUNT); // last value of array is for timeout
-      initializeTimer();
+      calculateOverflow(timeoutVal, PORT_COUNT); 
+      // last value of portOverflowCount array is for timeout
 
       initializePacket(packetQueue[packetQueueTail]);
       formatReplyPacket(packetQueue[packetQueueTail], 0x0D);
       closePacket(packetQueue[packetQueueTail]);
-      printQueue(packetQueue, PACKET_QUEUE_SIZE);
+//      printQueue(packetQueue, PACKET_QUEUE_SIZE);
+      Serial.println("Request");
+      sendPacketQueue();
+      while(requestConfig){
+        checkTimeout();
+      }
     }
   }
 }
@@ -511,13 +517,17 @@ void writeConfig() { // writes node configuration to SD card
 }
 
 void sendPacketQueue() {
-  
   while (packetQueueHead != packetQueueTail){
       printBuffer(packetQueue[packetQueueHead]);
       packetQueueHead = (packetQueueHead + 0x01) % PACKET_QUEUE_SIZE; // increment head
 
   }
-  packetQisEmpty = true;
+  if(packetQueueHead == packetQueueTail){
+    packetQisEmpty = true;
+  }
+  if(packetQisEmpty == true && requestConfig == true){
+    initializeTimer();
+  }
 }
 
 /************* Utilities *************/
@@ -1171,8 +1181,6 @@ void calculateOverflow(unsigned int tempTime, byte portOverflowIndex) {
   //stop timer ah
 
   //convert time to seconds store to realTime
-  Serial.print("In time: ");
-  Serial.println(tempTime, HEX);
   byte timeUnit = tempTime >> 12; // checks which unit
   unsigned int timeKeeper = tempTime & ((1 << 12) - 1); // get time only masking it
   //convert bcd to dec
@@ -1219,8 +1227,8 @@ void calculateOverflow(unsigned int tempTime, byte portOverflowIndex) {
   }
   portOverflowCount[portOverflowIndex] = overflowCount;
 
-  Serial.print("OFC: ");
-  Serial.println(portOverflowCount[portOverflowIndex]);
+//  Serial.print("OFC: ");
+//  Serial.println(portOverflowCount[portOverflowIndex]);
 
 
   //check overflowCount if reached @ INTERRUPT
@@ -1238,12 +1246,31 @@ unsigned int bcdToDecimal(unsigned int nTime) { //returns unsigned int to save s
   return temp;
 }
 
+void checkTimeout(){
+  if(requestConfig == true  && attemptIsSet){ //trying to request config and it has not yet come
+    if(attemptCounter <= MAX_ATTEMPT){ // if timeout * attempts has not passed
+      initializePacket(packetQueue[packetQueueTail]);
+      formatReplyPacket(packetQueue[packetQueueTail], 0x0D);
+      closePacket(packetQueue[packetQueueTail]);
+//      printQueue(packetQueue, PACKET_QUEUE_SIZE);
+      attemptIsSet = false; 
+//      Serial.println("Again!!");
+      sendPacketQueue();
+    }
+    else{
+      attemptCounter = 0x00; // reset
+      requestConfig = false;
+      errorFlag |= 0x02;
+//      Serial.println("Max reached");
+    }
+  }
+}
 ISR(TIMER2_OVF_vect) {
   timeCtr++;
   //  Serial.println(timeCtr);
   //  Serial.println(timeCtr);
   if ((timeCtr % 305) == 0) { //5sec
-    Serial.println("Five seconds");
+//    Serial.println("Five seconds");
     digitalWrite(4, digitalRead(4) ^ 1);
   }
   if ((timeCtr % 219726) == 0) { //1hr
@@ -1261,10 +1288,14 @@ ISR(TIMER2_OVF_vect) {
   if ((timeCtr % portOverflowCount[PORT_COUNT]) == 0 && (requestConfig == true) && (portOverflowCount[PORT_COUNT] != 0)) {
     //if it reached timeout and requestConfig is set and it is not zero
     attemptCounter = attemptCounter + 0x01; // increment counter
+    attemptIsSet = true;
+//    Serial.print("Attempt:");
+//    Serial.println(attemptCounter, HEX);
   }
 }
 
 void initializeTimer() {
+//  Serial.println("S Timer");
   //setting it up to normal mode
   // one OVF = 16ms ( 256 / (16MHZ/1024))
   cli(); //disable global interrupts
@@ -1318,13 +1349,13 @@ void setup() {
 
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
 }
+
 void loop() {
   boolean wait = 0;
-  byte attemptCounter; //for contacting the sink
   byte serialData;  //temporary store of data read from Serial
   static byte index = 0; //for queue
   static size_t pos = 0; //for buffer
-
+  
   //Communication module - Receive
   if (Serial.available() > 0) {
     serialData = Serial.read(); // 1 byte
