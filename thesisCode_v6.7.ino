@@ -26,8 +26,9 @@ byte destAddress = 0x00; //destination address (source address is set to destina
 byte sourceAddress = 0x00; //when receiving packet
 byte configVersion = 0x00; //node config version
 volatile byte attemptCounter = 0x00; //attempts count for contacting sink
-volatile byte attemptIsSet = false; 
-//byte maxAttempt = 0x03; //for contacting the sink
+volatile byte attemptIsSet = false; //tells that the attempt is just counted (else mag spam siya until mag %0 ulit)
+byte configPartNumber = 0x00; // stores the config part last served
+byte configSentPartCtr = 0x00; //config part being read
 
 unsigned int timeoutVal = 0x2005; //5 seconds
 boolean requestConfig = false; // checks if node is requesting config
@@ -53,7 +54,7 @@ unsigned int actuatorValueTimerSegment[(int) PORT_COUNT]; // stores data to writ
 byte segmentCounter = 0x00;  // counter for parsing the parts of the packet
 byte tempModeStorage = 0x00; // stores the port config 00-07
 byte portNum = 0x00;//parsing var
-byte partCounter = 0x00; //part of the data counter when receiving configs
+byte partCounter = 0x00; //data counter for more than 1 byte data when receiving configs
 byte commandValue = 0x00; // for api = 3, contains the command value
 byte checker = 0x00; // for api = 2 checker for threshold/range mode; api = 3 counter for receive (port num i think)
 
@@ -505,7 +506,7 @@ void writeConfig() { // writes node configuration to SD card
     //      strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
     //      Serial.println(buffer); //error
     byte temp = 0x08;
-    errorFlag |= 0x08; //setting error flag
+    errorFlag |= 0x08; //cannot access sd card or file not found
     Serial.println(errorFlag, HEX);
   }
   //  }
@@ -649,7 +650,7 @@ void checkOtherCommands() { // checks if there is still commands
 void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue_Size and buffer size; store to var from serial queue
   byte x = 0x00;
   byte halt = false;
-  byte configSentPartCtr;
+  
   //  for(byte x = 0x00; x < BUFFER_SIZE; x++){
   while (!halt) {
     //      Serial.print("SGM CTR: ");
@@ -823,7 +824,6 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
     }
     else if (segmentCounter == 0x0C) { //part checker
       configSentPartCtr = data;
-      partCounter = partCounter ^ partCounter;
 
       if (data == 0x00) {
         segmentCounter = 0x15; //actuator detail
@@ -1004,9 +1004,6 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       checker = 00;
       partCounter = 00;
       portNum = 00;
-      if ((apiCount == 0x03 && configSentPartCtr == MAX_CONFIG_PART-1) || apiCount != 0x03) { //all other apis except if api is 3, then ctr has to be 3
-        writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
-      }
       //        printRegisters(); // prints all to double check
     }
 
@@ -1414,8 +1411,29 @@ void loop() {
       //      headerFound = false;
       //      Serial.println(serialHead, HEX);
       //      Serial.println(serialTail, HEX);
-      if ((packetTypeFlag & 0x01) == 0x01) { // request startup config
-
+      if(requestConfig == true){ //if it is waiting for config
+        //if the packet is a config packet
+        if ((packetTypeFlag & 0x01) == 0x01) { // request startup config
+          if(configSentPartCtr == configPartNumber){
+            configPartNumber = configPartNumber + 0x01; //expect next packet
+            if(configPartNumber == MAX_CONFIG_PART-1){ // if it is max already
+              writeConfig(); //save config
+              requestConfig = false;  // turn off request
+              attemptCounter = 0x00;
+              configPartNumber = 0x00;
+              initializePacket(packetQueue[packetQueueTail]);
+              formatReplyPacket(packetQueue[packetQueueTail], 0x0C); //acknowledge of full config
+              closePacket(packetQueue[packetQueueTail]);
+            }
+          }
+          else{
+            Serial.println("broken config");
+            errorFlag |= 0x04;
+          }
+        }
+        else{
+          Serial.println("Unexpected packet");
+        }
       }
       else if ((packetTypeFlag & 0x02) == 0x02) { // node configuration
 
@@ -1435,9 +1453,12 @@ void loop() {
         packetTypeFlag = packetTypeFlag & 0xFB; // turn off packet type flag for node discov
       }
 
+      if (apiCount != 0x03) { //all other apis except if api is 3, then ctr has to be 3
+        writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
+      }
       //      printBuffer(packetQueue);
 
-      if (serialHead != serialTail)
+      if (serialHead != serialTail) //checks getting at serial Queue
         serialHead = (serialHead + 0x01) % SERIAL_QUEUE_SIZE; // increment head
       else {
         isEmpty = true;
