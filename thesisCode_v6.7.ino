@@ -50,6 +50,7 @@ unsigned int timerSegment[(int) PORT_COUNT]; //timer segment
 unsigned int eventSegment[(int) PORT_COUNT * 2]; //event segment - 24 slots (0-23(17h)) 0-B (if threshold mode) C-17 (if range mode)
 unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment (event)
 unsigned int actuatorValueTimerSegment[(int) PORT_COUNT]; // stores data to write on actuator if timer
+unsigned int portDataChanged[(int) PORT_COUNT]; // stores if the data is changed
 
 byte segmentCounter = 0x00;  // counter for parsing the parts of the packet
 byte tempModeStorage = 0x00; // stores the port config 00-07
@@ -531,6 +532,47 @@ void sendPacketQueue() {
   }
 }
 
+void checkPortConfig(){
+  unsigned int actuatorValue; 
+  
+  for(byte x = 0x00; x < PORT_COUNT; x++){
+    byte temp = portConfigSegment[x];
+    byte portNum = 0xF0 & temp; // to get port number; @ upper byte
+    portNum = portNum >> 4; // move it to the right
+    
+    if(temp & 0x01 == 0x01){ // time based
+    }
+    else if(temp & 0x02 == 0x02){ // event
+      
+    }
+    else if(temp & 0x04 == 0x04){ // odm
+      if ((temp & 0x08) == 0x08) { //actuator
+        actuatorValue = actuatorValueOnDemandSegment[x]; 
+        if(x < 0x06){ //digital port
+          if(actuatorValue == 0){
+            digitalWrite(portNum + 0x04, LOW); //port 0 is at pin 4
+          }
+          else if(actuatorValue == 1){
+            digitalWrite(portNum + 0x04, HIGH);
+          }
+          portValue[portNum] = digitalRead(portNum + 0x04);
+        }
+        else if(x >= 0x06){ // analog port
+        }
+      }
+      else if ((temp & 0x08) == 0x00) { // sensor
+        if(x < 0x06){ //digital port
+           portValue[portNum] = digitalRead(portNum + 0x04);
+        }
+        else if(x >= 0x06){ // analog port
+          
+        }
+        
+      }
+      portConfigSegment[x] &= 0xFB; // turn off odm at port config        
+    }
+  }
+}
 /************* Utilities *************/
 
 void printRegisters() { // prints all variables stored in the sd card
@@ -603,15 +645,11 @@ void checkPortModesSent() { // checks the configs of the ports then set segmentC
   else if ((tempModeStorage & 0x04) == 0x04) { // on demand
     strcpy_P(buffer, (char*)pgm_read_word(&(messages[6])));
     Serial.println(buffer);
-    strcpy_P(buffer, (char*)pgm_read_word(&(messages[7])));
-    Serial.print(buffer);
-    Serial.println(portNum, HEX);
-    byte temp = portConfigSegment[portNum];
-    onDemandRegister = 0x01 << portNum;
-    strcpy_P(buffer, (char*)pgm_read_word(&(messages[8])));
-    Serial.print(buffer);
-    Serial.println(onDemandRegister, BIN);
+//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[7])));
+//    Serial.print(buffer);
+//    Serial.println(portNum, HEX);
 
+    byte temp = portConfigSegment[portNum];
     //Checking bit 3 if it is actuator or sensor
     if ((temp & 0x08) == 0x08) { //actuator
       segmentCounter = 0X0D; // get actuator segment
@@ -1004,6 +1042,9 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       checker = 00;
       partCounter = 00;
       portNum = 00;
+      if (apiCount != 0x03) { //all other apis except if api is 3, then ctr has to be 3
+        writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
+      }
       //        printRegisters(); // prints all to double check
     }
 
@@ -1305,11 +1346,22 @@ void initializeTimer() {
 }
 
 void setup() {
-  //test pins for timer
+  //initialize pins
   pinMode(4, OUTPUT);
   pinMode(5, OUTPUT);
   pinMode(6, OUTPUT);
   pinMode(7, OUTPUT);
+  pinMode(8, OUTPUT);
+  pinMode(9, OUTPUT);
+
+  //setting to low
+  digitalWrite(4, LOW);
+  digitalWrite(5, LOW);
+  digitalWrite(6, LOW);
+  digitalWrite(7, LOW);
+  digitalWrite(8, LOW);
+  digitalWrite(9, LOW);
+
   pinMode(CS_PIN, OUTPUT);
   digitalWrite(CS_PIN, HIGH);
 
@@ -1319,7 +1371,7 @@ void setup() {
 
   // NOTE: AVOID PUTTING STUFF ON PIN 0 & 1 coz that is where serial is (programming, debugging)
   for (byte c = 0x00; c < 0x0C; c++) {
-    setPortConfigSegmentInit(c, 0); // set the port to input
+    setPortConfigSegmentInit(c, 1); // set the port to OUTPUT
     //    Serial.print("Port Config Segment at Start: ");
     //    Serial.println(getPortConfigSegment(c), HEX);
   }
@@ -1334,6 +1386,7 @@ void setup() {
   memset(portOverflowCount, 0, sizeof(portOverflowCount));
   memset(serialBuffer, 0x00, sizeof(serialBuffer));
   memset(serialQueue, 0x00, sizeof(serialQueue));
+  memset(portDataChanged, 0x00, sizeof(portDataChanged));
 
 //    if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
 //      writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
@@ -1453,9 +1506,7 @@ void loop() {
         packetTypeFlag = packetTypeFlag & 0xFB; // turn off packet type flag for node discov
       }
 
-      if (apiCount != 0x03) { //all other apis except if api is 3, then ctr has to be 3
-        writeConfig(); // saves configuration to SD card; therefore kapag hindi complete yung packet, hindi siya saved ^^v
-      }
+      
       //      printBuffer(packetQueue);
 
       if (serialHead != serialTail) //checks getting at serial Queue
