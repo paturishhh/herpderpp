@@ -439,9 +439,9 @@ void loadConfig() { //loads config file and applies it to the registers
 //      printQueue(packetQueue, PACKET_QUEUE_SIZE);
       Serial.println("Request");
       sendPacketQueue();
-      while(requestConfig){
-        checkTimeout();
-      }
+//      while(requestConfig){
+      checkTimeout();
+//      }
     }
   }
 }
@@ -1337,6 +1337,7 @@ void checkTimeout(){
     }
   }
 }
+
 ISR(TIMER2_OVF_vect) {
   timeCtr++;
   //  Serial.println(timeCtr);
@@ -1484,6 +1485,8 @@ void loop() {
 
   else {
     isService = true;
+    if(requestConfig == true)
+      checkTimeout(); //if nothing is received
   }
 
   if (isService) { // check serial queue
@@ -1503,7 +1506,9 @@ void loop() {
         if ((packetTypeFlag & 0x01) == 0x01) { // request startup config
           if(configSentPartCtr == configPartNumber){
             configPartNumber = configPartNumber + 0x01; //expect next packet
-            if(configPartNumber == MAX_CONFIG_PART-1){ // if it is max already
+            attemptCounter = 0x00; //reset it coz may dumating na tama
+            Serial.println(configPartNumber,HEX);
+            if(configPartNumber == MAX_CONFIG_PART){ // if it is max already
               writeConfig(); //save config
               requestConfig = false;  // turn off request
               attemptCounter = 0x00;
@@ -1513,7 +1518,7 @@ void loop() {
               closePacket(packetQueue[packetQueueTail]);
             }
           }
-          else{
+          else {
             Serial.println("broken config");
             errorFlag |= 0x04;
           }
