@@ -12,8 +12,8 @@
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
 #define PACKET_QUEUE_SIZE 0x0A // Queue for packet
-#define SERIAL_QUEUE_SIZE 0x08 // Queue for serial
-#define BUFFER_SIZE 0x1F // bytes queue will hold
+#define SERIAL_QUEUE_SIZE 0x05 // Queue for serial
+#define BUFFER_SIZE 0x37 // bytes queue will hold
 #define MAX_CONFIG_PART 0x05 // receiving config
 #define MAX_ATTEMPT 0x03 // contacting sink
 
@@ -1495,19 +1495,20 @@ void loop() {
     if (!isEmpty) {
       //      Serial.println("not empty");
 //      printBuffer(serialQueue,SERIAL_QUEUE_SIZE);
+      printQueue(serialQueue, SERIAL_QUEUE_SIZE);
       retrieveSerialQueue(serialQueue[serialHead], serialHead);
 
-      pos = 0;
       //      headerFound = false;
-      //      Serial.println(serialHead, HEX);
-      //      Serial.println(serialTail, HEX);
+            Serial.println(serialHead, HEX);
+            Serial.println(serialTail, HEX);
       if(requestConfig == true){ //if it is waiting for config
         //if the packet is a config packet
         if ((packetTypeFlag & 0x01) == 0x01) { // request startup config
           if(configSentPartCtr == configPartNumber){
             configPartNumber = configPartNumber + 0x01; //expect next packet
             attemptCounter = 0x00; //reset it coz may dumating na tama
-            Serial.println(configPartNumber,HEX);
+            packetTypeFlag = packetTypeFlag & 0xFE;
+            //Serial.println(configPartNumber,HEX);
             if(configPartNumber == MAX_CONFIG_PART){ // if it is max already
               writeConfig(); //save config
               requestConfig = false;  // turn off request
@@ -1519,12 +1520,16 @@ void loop() {
             }
           }
           else {
-            Serial.println("broken config");
-            errorFlag |= 0x04;
+            if(serialHead != serialTail) { // kasi nag double read siya
+              Serial.println("broken config");
+              errorFlag |= 0x04;
+            }
           }
         }
         else{
-          Serial.println("Unexpected packet");
+          if(serialHead != serialTail){
+            Serial.println("Unexpected packet");
+          }
         }
       }
       else if ((packetTypeFlag & 0x02) == 0x02) { // node configuration
