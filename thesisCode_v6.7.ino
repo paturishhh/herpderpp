@@ -1,6 +1,5 @@
 /*Uhm hi, you start counting at 0, okay, just for the gateway settings*/
 /*Programmed for Gizduino IOT-644*/
-//merging but buggy
 #include <SoftwareSerial.h>
 #include <avr/pgmspace.h>
 #include <SPI.h>
@@ -539,80 +538,81 @@ void sendPacketQueue() {
 void convertEventDetailsToDecimal(byte portNum){
   unsigned int temp = eventSegment[portNum];
   Serial.print("Event: ");
-  Serial.println(temp, HEX);
+  //Serial.println(temp, HEX);
   if(temp & 0x8000 == 0x8000){ //range mode
     convertedEventSegment[portNum] = bcdToDecimal(temp);
     temp = eventSegment[portNum + 0x0C]; //next part
     convertedEventSegment[portNum + 0x0C] = bcdToDecimal(temp);
     //Serial.println("@ Ra");
-    //Serial.println(convertedEventSegment[portNum]);
-    //Serial.println(convertedEventSegment[portNum + 0x0C]);
+    Serial.println(convertedEventSegment[portNum]);
+    Serial.println(convertedEventSegment[portNum + 0x0C]);
   }
   else{ //threshold
     convertedEventSegment[portNum] = bcdToDecimal(temp); //converts it to decimal
-    Serial.print("@ Th: ");
+    //Serial.print("@ Th: ");
     Serial.println(convertedEventSegment[portNum]);
   }
   
 }
-void checkPortConfig(){
+boolean checkPortConfig(){
   unsigned int actuatorValue; 
   byte configCheck = 0x00; // stores which bit is being checked
   byte configType;
-
+  boolean applyConfig = false;
 
   
   for(byte x = 0x00; x < PORT_COUNT; x++){
     unsigned int bitMask = (1<< x); 
-    //Serial.println(bitMask, HEX);
-    //Serial.println(configChangeRegister, HEX);
-    //Serial.println(configChangeRegister & bitMask, HEX);
-    if((configChangeRegister & bitMask) == configChangeRegister){ // config was changed
+//    Serial.println(bitMask, HEX);
+//    Serial.println(configChangeRegister, HEX);
+//    Serial.println(configChangeRegister & bitMask, HEX);
+    if((configChangeRegister & bitMask) == bitMask){ // config was changed
       byte temp = portConfigSegment[x];
-      byte portNum = 0xF0 & temp; // to get port number; @ upper byte
-      portNum = portNum >> 4; // move it to the right
-      //Serial.print("Port #:");
-      //Serial.println(portNum,HEX);
+      byte numPort = 0xF0 & temp; // to get port number; @ upper byte
+      numPort = numPort >> 4; // move it to the right
+      Serial.print("full port config");
+      Serial.println(temp,HEX);
       configType = temp & 0x0F; // get all config
       Serial.print("configType: ");
-      Serial.println(configType, HEX);
+      Serial.println(configType, HEX); // bakit siya pumapasok sa lahat ng if?
 
       while(configCheck!= 0x03){ //checks if config is sent per pin
-        if(configType & (1<< configCheck) == 0x01){ // time based
-          Serial.println("@ time!");
+        if(configType & (1<<configCheck) == 0x01){ // time based
+          //Serial.println("@ time!");
           //Serial.print("timerSeg: ");
-          Serial.println(timerSegment[portNum], HEX);
-          calculateOverflow(timerSegment[portNum], portNum);
-          //Serial.println(portOverflowCount[portNum]);
-          timerRequest |= (1<< portNum); // sets timer request
+          //Serial.println(timerSegment[portNum], HEX);
+          calculateOverflow(timerSegment[numPort], numPort);
+          Serial.println(portOverflowCount[numPort]);
+          timerRequest |= (1<< numPort); // sets timer request
           //Serial.println(timerRequest, HEX);
         }
-        else if(configType & (1<< configCheck) == 0x02){ // event
-          Serial.println("@ event");
-          convertEventDetailsToDecimal(portNum);
-          eventRequest |= (1<< portNum); //set event request
+        else if(configType & (1<<configCheck) == 0x02){ // event
+          //Serial.println("@ event");
+          convertEventDetailsToDecimal(numPort);
+          eventRequest |= (1<< numPort); //set event request
           //Serial.println(eventRequest, HEX);
         }
-        else if(configType & (1<< configCheck) == 0x04){ // odm
+        else if(configType & (1<<configCheck) == 0x04){ // odm
           Serial.println("@ odm");
+          
           if ((temp & 0x08) == 0x08) { //actuator
-            actuatorValue = actuatorValueOnDemandSegment[x]; 
+            actuatorValue = actuatorValueOnDemandSegment[numPort]; 
             //Serial.println(actuatorValue, HEX);
             if(x < 0x06){ //digital port
               if(actuatorValue == 0){
-                digitalWrite(portNum + 0x04, LOW); //port 0 is at pin 4
+                digitalWrite(numPort + 0x04, LOW); //port 0 is at pin 4
               }
               else if(actuatorValue == 1){
-                digitalWrite(portNum + 0x04, HIGH);
+                digitalWrite(numPort + 0x04, HIGH);
               }
-              portValue[portNum] = digitalRead(portNum + 0x04);
+              portValue[numPort] = digitalRead(numPort + 0x04);
             }
             else if(x >= 0x06){ // analog port
             }
           }
           else if ((temp & 0x08) == 0x00) { // sensor
             if(x < 0x06){ //digital port
-              portValue[portNum] = digitalRead(portNum + 0x04);
+              portValue[numPort] = digitalRead(numPort + 0x04);
             }
             else if(x >= 0x06){ // analog port
             
@@ -621,10 +621,10 @@ void checkPortConfig(){
 
           Serial.print("Port Config: ");
           Serial.println(portConfigSegment[x], HEX);
-          portConfigSegment[x] &= 0xFB; // turn off odm at port config        
+          portConfigSegment[x] = portConfigSegment[x] & 0xFB; // turn off odm at port config        
           Serial.print("Updated Port Config: ");
           Serial.println(portConfigSegment[x], HEX);
-          portDataChanged |= (1 << portNum); //inform that it has been updated
+          portDataChanged |= (1 << numPort); //inform that it has been updated
           Serial.print("PortDataChange: ");
           Serial.println(portDataChanged,HEX);
           configChangeRegister = configChangeRegister & ~bitMask; //turns off config changed flag
@@ -633,8 +633,13 @@ void checkPortConfig(){
         }
         configCheck = configCheck + 0x01;
       }
+      configCheck = 0x00; // reset again
+    }
+    else{
+      Serial.println("skipped");
     }
   }
+  return applyConfig;
 }
 /************* Utilities *************/
 
@@ -812,7 +817,7 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       portNum = 0xF0 & data; // to get port number; @ upper byte
       portNum = portNum >> 4; // move it to the right
       configChangeRegister |= (1 << portNum);
-      Serial.print("configChange: ");
+      Serial.print("NEW configChange: ");
       Serial.println(configChangeRegister, HEX);
       setPortConfigSegment(portNum, data); // stored to port config segment
       tempModeStorage = data & 0x07; // stores the modes sent; @ lower byte
@@ -1458,16 +1463,16 @@ void setup() {
   memset(serialQueue, 0x00, sizeof(serialQueue));
   memset(convertedEventSegment, 0x00, sizeof(convertedEventSegment));
 
-//    if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
-//      writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
-//    }
-//    else{
-//      byte temp = 0x01;
-//      errorFlag |= temp; // cannot access sd card
-//      Serial.println(errorFlag, HEX);
-//    }
+    if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
+      writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
+    }
+    else{
+      byte temp = 0x01;
+      errorFlag |= temp; // cannot access sd card
+      Serial.println(errorFlag, HEX);
+    }
 
-  loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
+  //loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
 }
 
 void loop() {
@@ -1528,20 +1533,13 @@ void loop() {
     isService = false;
 
     if (!isEmpty) {
-      //      Serial.println("not empty");
-//      printBuffer(serialQueue,SERIAL_QUEUE_SIZE);
-      //printQueue(serialQueue, SERIAL_QUEUE_SIZE);
-      retrieveSerialQueue(serialQueue[serialHead], serialHead);
-      if (serialHead != serialTail) //checks getting at serial Queue
+      if (serialHead != serialTail){ //checks getting at serial Queue
+        retrieveSerialQueue(serialQueue[serialHead], serialHead);
         serialHead = (serialHead + 0x01) % SERIAL_QUEUE_SIZE; // increment head
+      }
       else {
         isEmpty = true;
-        //        Serial.println("Queue is empty");
       }
-
-      //      headerFound = false;
-            //Serial.println(serialHead, HEX);
-            //Serial.println(serialTail, HEX);
       if(requestConfig == true){ //if it is waiting for config
         //if the packet is a config packet
         if ((packetTypeFlag & 0x01) == 0x01) { // request startup config
@@ -1561,25 +1559,27 @@ void loop() {
             }
           }
           else {
-            if(serialHead != serialTail) { // kasi nag double read siya
-              Serial.println("broken config");
-              errorFlag |= 0x04;
-            }
+//            if(serialHead != serialTail) { // kasi nag double read siya
+            Serial.println("broken config");
+            errorFlag |= 0x04;
+//            }
           }
         }
-        else{
-          if(serialHead != serialTail){
+        else{ // unexpected packet
+//          if(serialHead != serialTail){
             Serial.println("Unexpected packet");
-          }
+//          }
         }
       }
       else if ((packetTypeFlag & 0x02) == 0x02) { // node configuration
-        checkPortConfig();
-        initializePacket(packetQueue[packetQueueTail]);
-        formatReplyPacket(packetQueue[packetQueueTail], 0x06); 
-        closePacket(packetQueue[packetQueueTail]);
-        sendPacketQueue();
-        writeConfig();
+        boolean applyConfig = checkPortConfig();
+        if(applyConfig){ // if successfully applied
+          initializePacket(packetQueue[packetQueueTail]);
+          formatReplyPacket(packetQueue[packetQueueTail], 0x06); 
+          closePacket(packetQueue[packetQueueTail]);
+          sendPacketQueue();
+          writeConfig();
+        }
       }
       else if ((packetTypeFlag & 0x04) == 0x04) { // node discovery
         if (commandValue == 0x00) { // Request Keep Alive
@@ -1595,13 +1595,8 @@ void loop() {
         }
         packetTypeFlag = packetTypeFlag & 0xFB; // turn off packet type flag for node discov
       }
-
-      
-      //      printBuffer(packetQueue);
-
     }
     else {
-      //      Serial.println("You are empty");
     }
   }
 }
