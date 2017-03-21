@@ -191,16 +191,49 @@ void initializePacket(byte pQueue[]) { // one row //adds necessary stuff at init
   pQueue[3] = 0x03; //api used to reply is currently 3
 }
 
-void insertToPacket(byte pQueue[], byte command) { // for port data
+void insertToPacket(byte pQueue[], byte portNumber, unsigned int portData) { // for port data
+  //command, count, port num, port value
   //adds count for each command
   //checks if equal to buffersize - 2 (coz may footer pa)
-  pQueue[5] = command; //command
-  //other parameters depend on command
-  if (command == 0xF7) {
+  pQueue[5] = 0x0F; //command
+
+  if((packetPos!= (BUFFER_SIZE-2)) &&((packetPos + 0x03) <= (BUFFER_SIZE-2))){ //if not full and kapag nilagay mo dapat hindi mapupuno
+    packetPos = packetPos + 0x01;//packetPos starts at command's pos
+    pQueue[packetPos] = portNumber;
     packetPos = packetPos + 0x01;
+    pQueue[packetPos] = 
+    packetCommandCounter = packetCommandCounter + 0x01; //increment count
   }
-  packetPos = packetPos + 0x01;
-  packetCommandCounter = packetCommandCounter + 0x01; //increment count
+  else{ //puno na or hindi na kasya
+    Serial.print("Con1: ");
+    Serial.println((packetPos!= (BUFFER_SIZE-2)));
+    Serial.print("Con2: ");
+    Serial.println((packetPos + 0x03) <= (BUFFER_SIZE-2));
+    closePacket(packetQueue[packetQueueTail]);
+    if(packetQueueHead != packetQueueTail){ //if queue is not full{
+      initializePacket(packetQueue[packetQueueTail]); //create new packet
+    }
+    else{
+      
+    }
+  }
+}
+
+//insert count @ packet
+//pQueue[4] = (packetCommandCounter - 0x01);
+//if port data pinapadala
+//reset count
+//packetCommandCounter = 0x00; // reset counter
+//packetPos = 0x05; // reset to put command
+
+void closePacket(byte pQueue[]) {
+  if(packetCommandCounter != 0x00){//possibly sending portData
+    pQueue[4] = packetCommandCounter; 
+    Serial.println("port data cnt");
+  }
+  pQueue[packetPos] = 0xFE; //footer
+  packetCommandCounter = 0x00; //reset command counter
+  packetQueueTail = (packetQueueTail + 0x01) % PACKET_QUEUE_SIZE; // point to next in queue
 }
 
 void formatReplyPacket(byte pQueue[], byte command) { // format reply with command param only
@@ -252,17 +285,6 @@ void printBuffer(byte temp[]){
       }
   }
   Serial.println();
-}
-//insert count @ packet
-//pQueue[4] = (packetCommandCounter - 0x01);
-//if port data pinapadala
-//reset count
-//packetCommandCounter = 0x00; // reset counter
-//packetPos = 0x05; // reset to put command
-
-void closePacket(byte pQueue[]) {
-  pQueue[packetPos] = 0xFE; //footer
-  packetQueueTail = (packetQueueTail + 0x01) % PACKET_QUEUE_SIZE; // point to next in queue
 }
 
 void loadConfig() { //loads config file and applies it to the registers
@@ -1702,7 +1724,7 @@ void loop() {
         packetTypeFlag = packetTypeFlag & 0xFB; // turn off packet type flag for node discov
       }
     }
-    else { //empty
+    else { //main loop if no message
       Serial.println("Check Timer Grant");
       if(timerGrant != 0x00){ //check timer grant
         unsigned int timerGrantMask = 0x00; 
@@ -1717,7 +1739,7 @@ void loop() {
           }
         }
         Serial.print("End loop timerGrant: ");
-        Serial.println(timerGrant, HEX);// dapat zero 
+        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
         
       }
       if(eventRequest != 0x00){ // check event request
@@ -1790,7 +1812,16 @@ void loop() {
         Serial.print("End loop eventRequest: ");
         Serial.println(eventRequest, HEX);// dapat zero
       }
-      if(portDataChanged){
+      if(portDataChanged!= 0x00){ //to form packet
+        unsigned int portDataChangedMask; 
+        for(byte x = 0x00; x < PORT_COUNT; x++){
+          portDataChangedMask = (1<<x);
+
+          if((portDataChanged & portDataChangedMask) == portDataChangedMask){ //portData was changed
+            initializePacket(packetQueue[packetQueueTail]);
+            closePacket(packetQueue[packetQueueTail]);
+          }
+        }
         
       }
     }
