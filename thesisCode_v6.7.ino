@@ -135,37 +135,37 @@ char buffer[32]; //update according to longest message
 
 /************* Other Node Modules *************/
 void triggerOnDemand() {
-  //check which port/s is set
-  for (byte x = 0x00; x <= 0x0C; x++) {
-    int onDemand = onDemandRegister & (0x01 << x); //shift it then AND it
-    Serial.print("onDemandValue: ");
-    Serial.println(onDemand);
-    Serial.print("Checking port: ");
-    Serial.println(x);
-    if (onDemand == (0x01 << x)) { // if is set
-      Serial.print("Port set: ");
-      Serial.println(x);
-      byte temp = portConfigSegment[x]; // get port config segment of that port
-      temp = temp & 0x08; // check if 0x08 then actuator; if 0x00 sensor
-      Serial.println("TEMP: ");
-      Serial.print(temp);
-      if (temp == 0x08) { // ODM - actuator write
-        if (x >= 0x06) { //analog
-          //          temp = analogWrite(port[x]);
-
-        }
-        else { //digital
-
-        }
-
-      }
-      else if (temp == 0x00) { // ODM - sensor read
-
-      }
-
-
-    }
-  }
+//  //check which port/s is set
+//  for (byte x = 0x00; x <= 0x0C; x++) {
+//    int onDemand = onDemandRegister & (0x01 << x); //shift it then AND it
+//    Serial.print("onDemandValue: ");
+//    Serial.println(onDemand);
+//    Serial.print("Checking port: ");
+//    Serial.println(x);
+//    if (onDemand == (0x01 << x)) { // if is set
+//      Serial.print("Port set: ");
+//      Serial.println(x);
+//      byte temp = portConfigSegment[x]; // get port config segment of that port
+//      temp = temp & 0x08; // check if 0x08 then actuator; if 0x00 sensor
+//      Serial.println("TEMP: ");
+//      Serial.print(temp);
+//      if (temp == 0x08) { // ODM - actuator write
+//        if (x >= 0x06) { //analog
+//          //          temp = analogWrite(port[x]);
+//
+//        }
+//        else { //digital
+//
+//        }
+//
+//      }
+//      else if (temp == 0x00) { // ODM - sensor read
+//
+//      }
+//
+//
+//    }
+//  }
   //for each port set
   // check 3rd bit of port config segment [of that port]
   //if sensor
@@ -537,6 +537,48 @@ void sendPacketQueue() {
   }
 }
 
+void manipulatePortData(byte index, byte configType){ //checks port type, actuates and senses accordingly
+  //configType is to know where to get actuator value
+  unsigned int actuatorValue = 0x0000;
+   
+  if((portConfigSegment[index] & 0x08) == 0x08){ //actuator
+    if(configType == 0x00){ // time
+      actuatorValue = actuatorValueTimerSegment[index];
+    }
+    else if(configType == 0x01){ // event
+      actuatorValue = actuatorDetailSegment[index];
+    }
+    else if(configType == 0x02){ //odm
+      actuatorValue = actuatorValueOnDemandSegment[index];   
+    }
+    
+    //Serial.println(actuatorValue, HEX);
+
+    if(index < 0x06){ // digital actuator
+      if(actuatorValue == 0){
+        digitalWrite(index + 0x04, LOW); //port 0 is at pin 4
+      }
+      else if(actuatorValue == 1){
+        digitalWrite(index + 0x04, HIGH);
+      }
+      portValue[index] = digitalRead(index + 0x04);
+    }
+    else if(index >= 0x06){ //analog actuator
+      
+    }
+  }
+  else{ //sensor
+    Serial.println("Sensor!");
+    if(index < 0x06){ //Digital sensor
+      portValue[index] = digitalRead(index + 0x04);
+    }
+    else if(index>= 0x06){ // analog sensor
+      
+    }
+  }
+  portDataChanged|=(1<< index); //set port data changed  
+}
+        
 void convertEventDetailsToDecimal(byte portNum){
   unsigned int temp = eventSegment[portNum];
   Serial.print("Event: ");
@@ -556,6 +598,7 @@ void convertEventDetailsToDecimal(byte portNum){
   }
   
 }
+
 boolean checkPortConfig(){
   unsigned int actuatorValue; 
   byte configCheck = 0x00; // stores which bit is being checked
@@ -570,8 +613,6 @@ boolean checkPortConfig(){
 //    Serial.println(configChangeRegister & bitMask, HEX);
     if((configChangeRegister & bitMask) == bitMask){ // config was changed
       byte temp = portConfigSegment[x];
-      byte numPort = 0xF0 & temp; // to get port number; @ upper byte
-      numPort = numPort >> 4; // move it to the right
       Serial.print("full port config");
       Serial.println(temp,HEX);
       configType = temp & 0x0F; // get all config
@@ -579,48 +620,27 @@ boolean checkPortConfig(){
       Serial.println(configType, HEX); // bakit siya pumapasok sa lahat ng if?
 
       while(configCheck!= 0x03){ //checks if config is sent per pin
-        if(configType & (1<<configCheck) == 0x01){ // time based
+        byte checker = (configType & (1<<configCheck));
+        if(checker == 0x01){ // time based
           //Serial.println("@ time!");
           //Serial.print("timerSeg: ");
           //Serial.println(timerSegment[portNum], HEX);
-          calculateOverflow(timerSegment[numPort], numPort);
-          Serial.println(portOverflowCount[numPort]);
-          timerRequest |= (1<< numPort); // sets timer request
+          calculateOverflow(timerSegment[x], x);
+          Serial.println(portOverflowCount[x]);
+          timerRequest |= (1<< x); // sets timer request
           //Serial.println(timerRequest, HEX);
           timerReset = true;
         }
-        else if(configType & (1<<configCheck) == 0x02){ // event
+        else if(checker == 0x02){ // event
           //Serial.println("@ event");
-          convertEventDetailsToDecimal(numPort);
-          eventRequest |= (1<< numPort); //set event request
+          convertEventDetailsToDecimal(x);
+          eventRequest |= (1<< x); //set event request
           //Serial.println(eventRequest, HEX);
         }
-        else if(configType & (1<<configCheck) == 0x04){ // odm
+        else if(checker == 0x04){ // odm
           Serial.println("@ odm");
+          manipulatePortData(x, 0x02); // odm type 
           
-          if ((temp & 0x08) == 0x08) { //actuator
-            actuatorValue = actuatorValueOnDemandSegment[numPort]; 
-            //Serial.println(actuatorValue, HEX);
-            if(x < 0x06){ //digital port
-              if(actuatorValue == 0){
-                digitalWrite(numPort + 0x04, LOW); //port 0 is at pin 4
-              }
-              else if(actuatorValue == 1){
-                digitalWrite(numPort + 0x04, HIGH);
-              }
-              portValue[numPort] = digitalRead(numPort + 0x04);
-            }
-            else if(x >= 0x06){ // analog port
-            }
-          }
-          else if ((temp & 0x08) == 0x00) { // sensor
-            if(x < 0x06){ //digital port
-              portValue[numPort] = digitalRead(numPort + 0x04);
-            }
-            else if(x >= 0x06){ // analog port
-            
-            }
-          }
           
 //          commented the following block kasi hindi mo need yun
 //          Serial.print("Port Config: ");
@@ -628,7 +648,7 @@ boolean checkPortConfig(){
 //          portConfigSegment[x] = portConfigSegment[x] & 0xFB; // turn off odm at port config        
 //          Serial.print("Updated Port Config: ");
 //          Serial.println(portConfigSegment[x], HEX);
-          portDataChanged |= (1 << numPort); //inform that it has been updated
+          portDataChanged |= (1 << x); //inform that it has been updated
           Serial.print("PortDataChange: ");
           Serial.println(portDataChanged,HEX);
           configChangeRegister = configChangeRegister & ~bitMask; //turns off config changed flag
@@ -1646,24 +1666,26 @@ void loop() {
       if(timerGrant != 0x00){ //check timer granted
         unsigned int timerGrantMask = 0x00; 
 
-        for (x = 0x00; x < PORT_COUNT; x++){
+        for (byte x = 0x00; x < PORT_COUNT; x++){
           timerGrantMask = (timerGrantMask << x);
-
-          if(timerGrantMask & timerGrant == timerGrantMask){ // if set
-            if((portConfigSegment[x] & 0x08) == 0x08){ //actuator
-              bcdToDecimal 
-            }
-            else{
-              Serial.println("Sensor!");
-            }
-              
-            
-          }
           
+          if(timerGrantMask & timerGrant == timerGrantMask){ // if set
+            manipulatePortData(x,0x00); //timer
+            timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
+            Serial.println(timerGrant, HEX);
+          }
         }
       }
-      else if(eventRequest != 0x00){ // check event grant
-        
+      if(eventRequest != 0x00){ // check event grant
+        unsigned int eventRequestMask = 0x0000;
+
+        for(byte x = 00; x < PORT_COUNT; x++){
+          eventRequestMask = (eventRequestMask << x);
+
+          if(eventRequestMask & eventRequest == eventRequestMask){
+            
+          }
+        }
       }
     }
   }
