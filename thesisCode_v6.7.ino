@@ -6,6 +6,7 @@
 #include <SD.h>
 #include <avr/interrupt.h>
 #include <math.h>
+#include <Servo.h>
 
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
@@ -579,24 +580,62 @@ void manipulatePortData(byte index, byte configType){ //checks port type, actuat
   portDataChanged|=(1<< index); //set port data changed  
 }
         
-void convertEventDetailsToDecimal(byte portNum){
+void convertEventDetailsToDecimal(byte portNum){// from bcd to decimal
   unsigned int temp = eventSegment[portNum];
   Serial.print("Event: ");
   //Serial.println(temp, HEX);
   if(temp & 0x8000 == 0x8000){ //range mode
+    temp = (temp & 0xF000); // get data only
     convertedEventSegment[portNum] = bcdToDecimal(temp);
     temp = eventSegment[portNum + 0x0C]; //next part
+    temp = (temp & 0xF000);
     convertedEventSegment[portNum + 0x0C] = bcdToDecimal(temp);
     //Serial.println("@ Ra");
     Serial.println(convertedEventSegment[portNum]);
     Serial.println(convertedEventSegment[portNum + 0x0C]);
   }
   else{ //threshold
+    temp = (temp & 0xF000);
     convertedEventSegment[portNum] = bcdToDecimal(temp); //converts it to decimal
     //Serial.print("@ Th: ");
     Serial.println(convertedEventSegment[portNum]);
   }
   
+}
+
+boolean checkEventCondition(byte eventCondition, int tempPortValue, int eventValue){
+  byte conditionReached = false;
+  
+  if(eventCondition == 0x00){ //less than not equal 
+  // portData < eventValue
+    if(tempPortValue < eventValue){
+      conditionReached = true;
+    }
+    Serial.println("<");
+  }
+  else if(eventCondition == 0x01){ // less than equal
+  //portData <= eventValue
+    if(tempPortValue <= eventValue){
+      conditionReached = true;
+    }
+    Serial.println("<=");
+  }
+  else if(eventCondition == 0x02){ // greater than not equal
+  // portData > eventValue
+    if(tempPortValue > eventValue){
+      conditionReached = true;
+    }
+    Serial.println(">");
+  }
+  else if(eventCondition == 0x03){ // greater than equal
+  // portData >= eventValue
+    if(tempPortValue >= eventValue){
+      conditionReached = true;
+    }
+    Serial.println(">=");
+  }
+  
+  return conditionReached;
 }
 
 boolean checkPortConfig(){
@@ -663,6 +702,8 @@ boolean checkPortConfig(){
       Serial.println("skipped");
     }
   }
+  Serial.print("End of port config flag: ");
+  Serial.println(configChangeRegister, HEX); //dapat 0
   return applyConfig;
 }
 /************* Utilities *************/
@@ -1663,7 +1704,7 @@ void loop() {
     }
     else { //empty
       Serial.println("Check Timer Grant");
-      if(timerGrant != 0x00){ //check timer granted
+      if(timerGrant != 0x00){ //check timer grant
         unsigned int timerGrantMask = 0x00; 
 
         for (byte x = 0x00; x < PORT_COUNT; x++){
@@ -1675,17 +1716,82 @@ void loop() {
             Serial.println(timerGrant, HEX);
           }
         }
+        Serial.print("End loop timerGrant: ");
+        Serial.println(timerGrant, HEX);// dapat zero 
+        
       }
-      if(eventRequest != 0x00){ // check event grant
+      if(eventRequest != 0x00){ // check event request
+        
         unsigned int eventRequestMask = 0x0000;
-
+        int eventValue;
+        byte eventCondition;
+        boolean conditionReached = false; 
+        int tempPortValue;
+        
+        Serial.println("Event Request");
+        
         for(byte x = 00; x < PORT_COUNT; x++){
           eventRequestMask = (eventRequestMask << x);
 
-          if(eventRequestMask & eventRequest == eventRequestMask){
+          //check if port is event based
+          if((eventRequestMask & eventRequest) == eventRequestMask){
             
+            //read port value
+            if(x < 0x06){ //digital
+              tempPortValue = digitalRead(x + 0x04);
+              Serial.print("Read port val: ");
+              Serial.println(tempPortValue);
+            }
+            else if(x >= 0x06){ //analog
+              tempPortValue = analogRead((x%6)); //write at analog pin
+              Serial.print("Read port val: ");
+              Serial.println(tempPortValue);
+            }
+
+            //check condition
+            eventValue = convertedEventSegment[x];
+            eventCondition = ((eventSegment[x] & 0x3000) >> 12); //retain the condition
+            Serial.print("Event Condition:");
+            Serial.println(eventCondition, HEX);
+
+            conditionReached = checkEventCondition(eventCondition, tempPortValue, eventValue);
+            
+            eventValue = eventSegment[x]; //getting event values
+
+            if((eventValue & 0x80) == 0x80){ //check if range mode
+              Serial.println("Range!");
+              eventCondition = ((eventSegment[x+ 0x0C] & 0x3000) >> 12); //retain the condition
+              eventValue = convertedEventSegment[x + 0x0C]; //get second value
+
+              conditionReached &= checkEventCondition(eventCondition, tempPortValue, eventValue); //check again
+              Serial.print("Condition Result:");
+              Serial.println(conditionReached);
+            }
+
+            if(conditionReached){
+              Serial.println("condition was true");
+              portValue[x] = tempPortValue; //save port value
+              portDataChanged |= eventRequestMask; // to tell that the port data has changed
+
+              unsigned int actuatorValue = actuatorDetailSegment[x] & 0x0FFF;
+              Serial.print("actuator Value: ");
+              Serial.println(actuatorValue);
+              byte actuatorPort = ((actuatorDetailSegment[x] & 0xF000) >> 12);  //get actuator port
+              Serial.print("actuator Port: ");
+              Serial.println(actuatorPort, HEX);
+              manipulatePortData(actuatorPort, 0x02); // write data to config port and store its port value
+              eventRequest |= ~(1<<x); //turn off event request of sensor bit
+              Serial.print("Event Request: ");
+              Serial.println(eventRequest, HEX); 
+              portDataChanged |= (1<< actuatorPort); // tells port data of actuator port has changed
+            }
           }
         }
+        Serial.print("End loop eventRequest: ");
+        Serial.println(eventRequest, HEX);// dapat zero
+      }
+      if(portDataChanged){
+        
       }
     }
   }
