@@ -23,9 +23,12 @@ packetCommand = input("Enter command: ")
 #convert input to bytes
 convertedCommand = convertStringToByteArray(packetCommand)
 
-arduino.write([convertedCommand[0]])
+
+#trying to automate sending byte per byte to arduino
+for x in range(0, len(convertedCommand)):
+	arduino.write([convertedCommand[x]])
 # time.sleep(2)	
-arduino.write([convertedCommand[1]])
+# arduino.write([convertedCommand[1]])
 # time.sleep(2)
 while True:
 	time.sleep(2)

@@ -6,7 +6,7 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
 //  Serial.println(Serial.available());
-  byte byteArray[0x01]; 
+  byte byteArray[0x37]; 
   byte index = 0x00;
   if(Serial.available() > 0){
       byte val = Serial.read();
