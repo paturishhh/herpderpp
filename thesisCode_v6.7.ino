@@ -450,7 +450,8 @@ void loadConfig() { //loads config file and applies it to the registers
       initializePacket(packetQueue[packetQueueHead]);
       formatReplyPacket(packetQueue[packetQueueHead], 0x0B);
       closePacket(packetQueue[packetQueueHead]);
-      //      printBuffer(packetQueue, PACKET_QUEUE_SIZE);
+//      sendPacketQueue();
+//      printBuffer(packetQueue, PACKET_QUEUE_SIZE);
 
       configFile.close();
       initializeTimer();
@@ -1011,7 +1012,7 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       if (data == 0x00) { // Request keep alive message
         commandValue = 0x00;
         packetTypeFlag |= 0x04; //set packet type to node discovery
-        segmentCounter = 0x16; // go to footer
+        segmentCounter = 0x16; // node discovery check
       }
       if (data == 0x02) { //Network Config
         commandValue = 0x02;
@@ -1158,7 +1159,12 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       }
     }
     else if (segmentCounter == 0x16) { // NODE DISCOVERY - NETWORK CONFIGURATION - SINK ADDR
-      sinkAddress = data;
+      if(commandValue ==0x02){ //network config
+        sinkAddress = data; //change sink node addr
+      }
+      else if(commandValue == 0x00){ //keep alive
+        //retain
+      }
       segmentCounter = 0xFF;
     }
     else if (segmentCounter == 0x17) { // TIMER - ACTUATOR SEGMENT
@@ -1588,16 +1594,16 @@ void setup() {
   memset(serialQueue, 0x00, sizeof(serialQueue));
   memset(convertedEventSegment, 0x00, sizeof(convertedEventSegment));
 
-    if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
-      writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
-    }
-    else{
-      byte temp = 0x01;
-      errorFlag |= temp; // cannot access sd card
-      Serial.println(errorFlag, HEX);
-    }
+//    if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
+//      writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
+//    }
+//    else{
+//      byte temp = 0x01;
+//      errorFlag |= temp; // cannot access sd card
+//      Serial.println(errorFlag, HEX);
+//    }
 
-  //loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
+  loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
 }
 
 void loop() {
@@ -1716,6 +1722,7 @@ void loop() {
       else if ((packetTypeFlag & 0x04) == 0x04) { // node discovery
         if (commandValue == 0x00) { // Request Keep Alive
           initializePacket(packetQueue[packetQueueTail]);
+          Serial.println(packetQueue[packetQueueTail][0x02], HEX);
           formatReplyPacket(packetQueue[packetQueueTail], 0x01);
           closePacket(packetQueue[packetQueueTail]);
           sendPacketQueue();
@@ -1729,23 +1736,23 @@ void loop() {
       }
     }
     else { //main loop if no message
-      Serial.println("Check Timer Grant");
-      if(timerGrant != 0x00){ //check timer grant
-        unsigned int timerGrantMask = 0x00; 
-
-        for (byte x = 0x00; x < PORT_COUNT; x++){
-          timerGrantMask = (timerGrantMask << x);
-          
-          if(timerGrantMask & timerGrant == timerGrantMask){ // if set
-            manipulatePortData(x,0x00); //timer
-            timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
-            Serial.println(timerGrant, HEX);
-          }
-        }
-        Serial.print("End loop timerGrant: ");
-        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
-        
-      }
+//      Serial.println("Check Timer Grant");
+//      if(timerGrant != 0x00){ //check timer grant
+//        unsigned int timerGrantMask = 0x00; 
+//
+//        for (byte x = 0x00; x < PORT_COUNT; x++){
+//          timerGrantMask = (timerGrantMask << x);
+//          
+//          if(timerGrantMask & timerGrant == timerGrantMask){ // if set
+//            manipulatePortData(x,0x00); //timer
+//            timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
+//            Serial.println(timerGrant, HEX);
+//          }
+//        }
+//        Serial.print("End loop timerGrant: ");
+//        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
+//        
+//      }
       if(eventRequest != 0x00){ // check event request
         
         unsigned int eventRequestMask = 0x0000;
