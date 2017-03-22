@@ -201,20 +201,23 @@ void insertToPacket(byte pQueue[], byte portNumber, unsigned int portData) { // 
     packetPos = packetPos + 0x01;//packetPos starts at command's pos
     pQueue[packetPos] = portNumber;
     packetPos = packetPos + 0x01;
-    pQueue[packetPos] = 
+    pQueue[packetPos] = highByte(portValue[portNumber]);
+    packetPos = packetPos + 0x01;
+    pQueue[packetPos] = lowByte(portValue[portNumber]);
     packetCommandCounter = packetCommandCounter + 0x01; //increment count
   }
   else{ //puno na or hindi na kasya
-    Serial.print("Con1: ");
-    Serial.println((packetPos!= (BUFFER_SIZE-2)));
-    Serial.print("Con2: ");
-    Serial.println((packetPos + 0x03) <= (BUFFER_SIZE-2));
+//    Serial.print("Con1: ");
+//    Serial.println((packetPos!= (BUFFER_SIZE-2)));
+//    Serial.print("Con2: ");
+//    Serial.println((packetPos + 0x03) <= (BUFFER_SIZE-2));
     closePacket(packetQueue[packetQueueTail]);
     if(packetQueueHead != packetQueueTail){ //if queue is not full{
       initializePacket(packetQueue[packetQueueTail]); //create new packet
+      insertToPacket(pQueue, portNumber, portData); 
     }
-    else{
-      
+    else{//queue is full
+      sendPacketQueue();
     }
   }
 }
@@ -232,6 +235,7 @@ void closePacket(byte pQueue[]) {
     Serial.println("port data cnt");
   }
   pQueue[packetPos] = 0xFE; //footer
+  packetPos = 0x05;
   packetCommandCounter = 0x00; //reset command counter
   packetQueueTail = (packetQueueTail + 0x01) % PACKET_QUEUE_SIZE; // point to next in queue
 }
@@ -1819,7 +1823,9 @@ void loop() {
 
           if((portDataChanged & portDataChangedMask) == portDataChangedMask){ //portData was changed
             initializePacket(packetQueue[packetQueueTail]);
+            insertToPacket(packetQueue[packetQueueTail], x, portValue[x]);
             closePacket(packetQueue[packetQueueTail]);
+            portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
           }
         }
         
