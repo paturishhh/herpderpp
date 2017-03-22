@@ -304,7 +304,7 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("coaa.log");
+    File configFile = SD.open("conf.log");
     if (configFile) { // check if exists, if not then no file
       while (configFile.available()) {
         int fileTemp = configFile.read();
@@ -320,7 +320,7 @@ void loadConfig() { //loads config file and applies it to the registers
           fileCounter = 0x02;
         }
         else if (fileCounter == 0x02) { //sink address
-          physicalAddress = fileTemp;
+          sinkAddress = fileTemp;
           fileCounter = 0x03;
         }
         else if (fileCounter == 0x03) { //config version
@@ -454,7 +454,7 @@ void loadConfig() { //loads config file and applies it to the registers
       initializePacket(packetQueue[packetQueueHead]);
       formatReplyPacket(packetQueue[packetQueueHead], 0x0B);
       closePacket(packetQueue[packetQueueHead]);
-      //      sendPacketQueue();
+      sendPacketQueue();
       //      printBuffer(packetQueue, PACKET_QUEUE_SIZE);
 
       configFile.close();
