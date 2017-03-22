@@ -304,7 +304,7 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("conf.log");
+    File configFile = SD.open("coaa.log");
     if (configFile) { // check if exists, if not then no file
       while (configFile.available()) {
         int fileTemp = configFile.read();
@@ -319,129 +319,133 @@ void loadConfig() { //loads config file and applies it to the registers
           physicalAddress = fileTemp;
           fileCounter = 0x02;
         }
-        else if (fileCounter == 0x02) { //config version
-          configVersion = fileTemp;
+        else if (fileCounter == 0x02) { //sink address
+          physicalAddress = fileTemp;
           fileCounter = 0x03;
         }
-        else if (fileCounter == 0x03) { //portconfigsegment(c)
-          index = fileTemp;
+        else if (fileCounter == 0x03) { //config version
+          configVersion = fileTemp;
           fileCounter = 0x04;
         }
-        else if (fileCounter == 0x04) {
+        else if (fileCounter == 0x04) { //portconfigsegment(c)
+          index = fileTemp;
+          fileCounter = 0x05;
+        }
+        else if (fileCounter == 0x05) {
           portConfigSegment[index] = fileTemp;
           if (index != (PORT_COUNT - 1)) {
-            fileCounter = 0x03;
+            fileCounter = 0x04;
           }
           else {
-            fileCounter = 0x05;
+            fileCounter = 0x06;
           }
         }
-        else if (fileCounter == 0x05) { //actuatorValueOnDemandSegment(c)
+        else if (fileCounter == 0x06) { //actuatorValueOnDemandSegment(c)
           index = fileTemp;
-          fileCounter = 0x06;
-        }
-        else if (fileCounter == 0x06) {
-          hiByte = fileTemp;
           fileCounter = 0x07;
         }
         else if (fileCounter == 0x07) {
+          hiByte = fileTemp;
+          fileCounter = 0x08;
+        }
+        else if (fileCounter == 0x08) {
           loByte = fileTemp;
           actuatorValueOnDemandSegment[index] = word(hiByte, loByte);
           if (index != (PORT_COUNT - 1)) {
-            fileCounter = 0x05;
+            fileCounter = 0x06;
           }
           else {
-            fileCounter = 0x08;
+            fileCounter = 0x09;
           }
         }
-        else if (fileCounter == 0x08) { //portValue(c)
+        else if (fileCounter == 0x09) { //portValue(c)
           index = fileTemp;
-          fileCounter = 0x09;
-        }
-        else if (fileCounter == 0x09) {
-          hiByte = fileTemp;
           fileCounter = 0x0A;
         }
         else if (fileCounter == 0x0A) {
+          hiByte = fileTemp;
+          fileCounter = 0x0B;
+        }
+        else if (fileCounter == 0x0B) {
           loByte = fileTemp;
           portValue[index] = word(hiByte, loByte);
           if (index != (PORT_COUNT - 1)) {
-            fileCounter = 0x08;
+            fileCounter = 0x09;
           }
           else {
-            fileCounter = 0x0B;
+            fileCounter = 0x0C;
           }
         }
-        else if (fileCounter == 0x0B) { //timerSegment(c)
+        else if (fileCounter == 0x0C) { //timerSegment(c)
           index = fileTemp;
-          fileCounter = 0x0C;
-        }
-        else if (fileCounter == 0x0C) {
-          hiByte = fileTemp;
           fileCounter = 0x0D;
         }
         else if (fileCounter == 0x0D) {
+          hiByte = fileTemp;
+          fileCounter = 0x0E;
+        }
+        else if (fileCounter == 0x0E) {
           loByte = fileTemp;
           timerSegment[index] = word(hiByte, loByte);
           if (index != (PORT_COUNT - 1)) {
-            fileCounter = 0x0B;
+            fileCounter = 0x0C;
           }
           else {
-            fileCounter = 0x0E;
+            fileCounter = 0x0F;
           }
         }
-        else if (fileCounter == 0x0E) { //eventSegment(c*2)
+        else if (fileCounter == 0x0F) { //eventSegment(c*2)
           index = fileTemp;
-          fileCounter = 0x0F;
-        }
-        else if (fileCounter == 0x0F) {
-          hiByte = fileTemp;
           fileCounter = 0x10;
         }
         else if (fileCounter == 0x10) {
+          hiByte = fileTemp;
+          fileCounter = 0x11;
+        }
+        else if (fileCounter == 0x11) {
           loByte = fileTemp;
           eventSegment[index] = word(hiByte, loByte);
           if (index != ((PORT_COUNT * 2) - 1)) {
-            fileCounter = 0x0E;
+            fileCounter = 0x0F;
           }
           else {
-            fileCounter = 0x11;
+            fileCounter = 0x12;
           }
         }
-        else if (fileCounter == 0x11) { //actuatorDetailSegment(c)
+        else if (fileCounter == 0x12) { //actuatorDetailSegment(c)
           index = fileTemp;
-          fileCounter = 0x12;
-        }
-        else if (fileCounter == 0x12) {
-          hiByte = fileTemp;
           fileCounter = 0x13;
         }
         else if (fileCounter == 0x13) {
+          hiByte = fileTemp;
+          fileCounter = 0x14;
+        }
+        else if (fileCounter == 0x14) {
           loByte = fileTemp;
           actuatorDetailSegment[index] = word(hiByte, loByte);
           if (index != (PORT_COUNT - 1)) {
-            fileCounter = 0x11;
+            fileCounter = 0x12;
           }
           else {
-            fileCounter = 0x14;
+            fileCounter = 0x15;
           }
         }
-        else if (fileCounter == 0x14) { //actuatorValueTimerSegment
+        else if (fileCounter == 0x15) { //actuatorValueTimerSegment
           index = fileTemp;
-          fileCounter = 0x15;
-        }
-        else if (fileCounter == 0x15) {
-          hiByte = fileTemp;
           fileCounter = 0x16;
         }
         else if (fileCounter == 0x16) {
+          hiByte = fileTemp;
+          fileCounter = 0x17;
+        }
+        else if (fileCounter == 0x17) {
           loByte = fileTemp;
           actuatorValueTimerSegment[index] = word(hiByte, loByte);
           if (index != (PORT_COUNT - 1)) {
-            fileCounter = 0x14;
+            fileCounter = 0x15;
           }
           else {
-            fileCounter = 0x17; //reset
+            fileCounter = 0x18; //reset
           }
         }
       }
@@ -487,6 +491,7 @@ void writeConfig() { // writes node configuration to SD card
   if (configFile) {
     configFile.write(logicalAddress);
     configFile.write(physicalAddress);
+    configFile.write(sinkAddress);
     //      configFile.println(destAddress, HEX);
     configFile.write(configVersion);
     configFile.flush(); // pre save
@@ -1697,7 +1702,7 @@ void loop() {
           }
         }
         else{ // unexpected packet
-//          if(serialHead != serialTail){
+          if(serialHead != serialTail){
             Serial.println("Unexpected packet");
 //          }
         }
@@ -1722,7 +1727,6 @@ void loop() {
       else if ((packetTypeFlag & 0x04) == 0x04) { // node discovery
         if (commandValue == 0x00) { // Request Keep Alive
           initializePacket(packetQueue[packetQueueTail]);
-          Serial.println(packetQueue[packetQueueTail][0x02], HEX);
           formatReplyPacket(packetQueue[packetQueueTail], 0x01);
           closePacket(packetQueue[packetQueueTail]);
           sendPacketQueue();
