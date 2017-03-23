@@ -1,5 +1,6 @@
 /*Uhm hi, you start counting at 0, okay, just for the gateway settings*/
 /*Programmed for Gizduino IOT-644*/
+/* turn off packettype flags after applying whatever is needed para hindi basahin ulit*/
 #include <SoftwareSerial.h>
 #include <avr/pgmspace.h>
 #include <SPI.h>
@@ -615,13 +616,13 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
 
 void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
   unsigned int temp = eventSegment[portNum];
-//  Serial.print("Port #: ");
-//  Serial.println(portNum, HEX);
+  //  Serial.print("Port #: ");
+  //  Serial.println(portNum, HEX);
   Serial.print("Event: ");
-//  Serial.println(temp, HEX);
-//  printRegisters();
+  //  Serial.println(temp, HEX);
+  //  printRegisters();
   if (temp & 0x8000 == 0x8000) { //range mode
-//    Serial.println((temp & 0x0FFF), HEX);
+    //    Serial.println((temp & 0x0FFF), HEX);
     temp = (temp & 0x0FFF); // get data only
     convertedEventSegment[portNum] = bcdToDecimal(temp);
     temp = eventSegment[portNum + 0x0C]; //next part
@@ -761,17 +762,17 @@ void printRegisters() { // prints all variables stored in the sd card
   //    Serial.print(buffer);
   //    Serial.println(configVersion,HEX);
 
-//  for (byte x = 0x00; x < PORT_COUNT; x++) {
-//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[19])));
-//    Serial.print(buffer);
-//    Serial.println(portConfigSegment[x], HEX);
-//  }
+  //  for (byte x = 0x00; x < PORT_COUNT; x++) {
+  //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[19])));
+  //    Serial.print(buffer);
+  //    Serial.println(portConfigSegment[x], HEX);
+  //  }
 
-//  for (byte x = 0x00; x < PORT_COUNT; x++) {
-//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[35])));
-//    Serial.print(buffer);
-//    Serial.println(actuatorValueTimerSegment[x], HEX);
-//  }
+  //  for (byte x = 0x00; x < PORT_COUNT; x++) {
+  //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[35])));
+  //    Serial.print(buffer);
+  //    Serial.println(actuatorValueTimerSegment[x], HEX);
+  //  }
 
   //  for (byte x = 0x00; x < PORT_COUNT; x++) {
   //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
@@ -791,11 +792,11 @@ void printRegisters() { // prints all variables stored in the sd card
   //    Serial.println(timerSegment[x], HEX);
   //  }
   //
-    for (byte x = 0x00; x < PORT_COUNT * 2; x++) {
-      strcpy_P(buffer, (char*)pgm_read_word(&(messages[24])));
-      Serial.print(buffer);
-      Serial.println(eventSegment[x], HEX);
-    }
+  for (byte x = 0x00; x < PORT_COUNT * 2; x++) {
+    strcpy_P(buffer, (char*)pgm_read_word(&(messages[24])));
+    Serial.print(buffer);
+    Serial.println(eventSegment[x], HEX);
+  }
   //
   //  for (byte x = 0x00; x < PORT_COUNT; x++) {
   //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[15])));
@@ -862,21 +863,21 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
   byte x = 0x00;
   byte halt = false;
   segmentCounter = 0x00;
-//  printBuffer(serialQueue[serialTail]);
+  //  printBuffer(serialQueue[serialTail]);
   //  for(byte x = 0x00; x < BUFFER_SIZE; x++){
   while (!halt) {
     //      Serial.print("SGM CTR: ");
     //      Serial.println(segmentCounter, HEX);
     byte data = queue[x];
-//     Serial.print("CTR: ");
-//      Serial.println(segmentCounter, HEX);
-//    Serial.print(data , HEX);
-    
+    //     Serial.print("CTR: ");
+    //      Serial.println(segmentCounter, HEX);
+    //    Serial.print(data , HEX);
+
     if (data == 0xFF && segmentCounter == 0x00) {
       segmentCounter = 0x01;
     }
     else if (segmentCounter == 0x01) { //SOURCE
-     
+
       sourceAddress = data;
       segmentCounter = 0x02;
     }
@@ -1062,7 +1063,7 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       else if (data == 0x04) {
         segmentCounter = 0x0E; //logical to actuator value on demand
       }
-      
+
     }
     else if (segmentCounter == 0x0D) { // ODM - ACTUATOR SEGMENT
       setActuatorValueOnDemandSegment(portNum, data);
@@ -1233,7 +1234,7 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       //        printRegisters(); // prints all to double check
     }
 
-    if ((x == BUFFER_SIZE) || (segmentCounter == 0xFF && data == 0xFE)){
+    if ((x == BUFFER_SIZE) || (segmentCounter == 0xFF && data == 0xFE)) {
       //max buffer or footer is found
       halt = true;
     }
@@ -1540,7 +1541,7 @@ ISR(TIMER2_OVF_vect) {
   }
   if (((timeCtr % portOverflowCount[9]) == 0) && ((timerRequest & 0x0200) == 0x0200)) {
     timerGrant |= (1 << 9);
-    timerRequest = timerRequest & (1 << 9);
+    timerRequest = timerRequest & ~(1 << 9);
   }
   if (((timeCtr % portOverflowCount[0x0A]) == 0) && ((timerRequest & 0x0400) == 0x0400)) {
     timerGrant |= (1 << 0x0A);
@@ -1608,17 +1609,17 @@ void setup() {
   memset(serialQueue, 0x00, sizeof(serialQueue));
   memset(convertedEventSegment, 0x00, sizeof(convertedEventSegment));
 
-  //    if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
-  //      writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
-  //    }
-  //    else{
-  //      byte temp = 0x01;
-  //      errorFlag |= temp; // cannot access sd card
-  //      Serial.println(errorFlag, HEX);
-  //    }
+  //      if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
+  //        writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
+  //      }
+  //      else{
+  //        byte temp = 0x01;
+  //        errorFlag |= temp; // cannot access sd card
+  //        Serial.println(errorFlag, HEX);
+  //      }
 
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
-//  printRegisters();
+  //  printRegisters();
 }
 
 void loop() {
@@ -1630,7 +1631,7 @@ void loop() {
   //Communication module - Receive
   if (Serial.available() > 0) {
     serialData = Serial.read(); // 1 byte
-//    Serial.print(serialData, HEX);
+    //    Serial.print(serialData, HEX);
 
     if (serialData == 0xFF) { // serialhead found start reading
       headerFound = true;
@@ -1659,12 +1660,12 @@ void loop() {
         pos = 0;
         serialTail = (serialTail + 0x01) % SERIAL_QUEUE_SIZE; // increment tail
         headerFound = false;
-//        Serial.println("Read");
-//        printQueue(serialQueue, SERIAL_QUEUE_SIZE);
-//        Serial.print("H: ");
-//        Serial.println(serialHead, HEX);
-//        Serial.print("T: ");
-//        Serial.println(serialTail, HEX);
+        //        Serial.println("Read");
+        //        printQueue(serialQueue, SERIAL_QUEUE_SIZE);
+        //        Serial.print("H: ");
+        //        Serial.println(serialHead, HEX);
+        //        Serial.print("T: ");
+        //        Serial.println(serialTail, HEX);
       }
       else {
         Serial.println("Full Queue");
@@ -1686,7 +1687,7 @@ void loop() {
 
     if (!isEmpty) { // there are messages
       if (serialHead != serialTail) { //checks getting at serial Queue then get
-//        Serial.println("Retr");
+        //        Serial.println("Retr");
         retrieveSerialQueue(serialQueue[serialHead], serialHead);
         serialHead = (serialHead + 0x01) % SERIAL_QUEUE_SIZE; // increment head
       }
@@ -1699,7 +1700,7 @@ void loop() {
           if (configSentPartCtr == configPartNumber) {
             attemptCounter = 0x00; //reset it coz may dumating na tama
             packetTypeFlag = packetTypeFlag & 0xFE;
-            if (configPartNumber == MAX_CONFIG_PART-1) { // if it is max already
+            if (configPartNumber == MAX_CONFIG_PART - 1) { // if it is max already
               writeConfig(); //save config
               requestConfig = false;  // turn off request
               attemptCounter = 0xFF; //para hindi magreset yung timer
@@ -1738,7 +1739,7 @@ void loop() {
             initializeTimer();
             timerReset = false;
           }
-          else{
+          else {
             Serial.println("!timerReset");
           }
         } else {
@@ -1761,23 +1762,23 @@ void loop() {
       }
     }
     else { //main loop if no message
-      //      Serial.println("Check Timer Grant");
-      //      if(timerGrant != 0x00){ //check timer grant
-      //        unsigned int timerGrantMask = 0x00;
-      //
-      //        for (byte x = 0x00; x < PORT_COUNT; x++){
-      //          timerGrantMask = (timerGrantMask << x);
-      //
-      //          if(timerGrantMask & timerGrant == timerGrantMask){ // if set
-      //            manipulatePortData(x,0x00); //timer
-      //            timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
-      //            Serial.println(timerGrant, HEX);
-      //          }
-      //        }
-      //        Serial.print("End loop timerGrant: ");
-      //        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
-      //
-      //      }
+      if (timerGrant != 0x00) { //check timer grant
+        unsigned int timerGrantMask = 0x00;
+        Serial.println("Check Timer Grant");
+
+        for (byte x = 0x00; x < PORT_COUNT; x++) {
+          timerGrantMask = (1 << x);
+
+          if ((timerGrantMask & timerGrant) == timerGrantMask) { // if set
+            manipulatePortData(x, 0x00); //timer
+            timerGrant = timerGrant & ~(1 << x); // clear timer grant of bit
+            Serial.println(timerGrant, HEX);
+          }
+        }
+        Serial.print("End loop timerGrant: ");
+        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
+
+      }
       if (eventRequest != 0x00) { // check event request
 
         unsigned int eventRequestMask = 0x0000;
