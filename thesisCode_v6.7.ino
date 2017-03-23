@@ -304,7 +304,7 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("coaa.log");
+    File configFile = SD.open("conf.log");
     if (configFile) { // check if exists, if not then no file
       while (configFile.available()) {
         int fileTemp = configFile.read();
@@ -615,13 +615,17 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
 
 void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
   unsigned int temp = eventSegment[portNum];
+//  Serial.print("Port #: ");
+//  Serial.println(portNum, HEX);
   Serial.print("Event: ");
-  //Serial.println(temp, HEX);
+//  Serial.println(temp, HEX);
+//  printRegisters();
   if (temp & 0x8000 == 0x8000) { //range mode
-    temp = (temp & 0xF000); // get data only
+//    Serial.println((temp & 0x0FFF), HEX);
+    temp = (temp & 0x0FFF); // get data only
     convertedEventSegment[portNum] = bcdToDecimal(temp);
     temp = eventSegment[portNum + 0x0C]; //next part
-    temp = (temp & 0xF000);
+    temp = (temp & 0x0FFF);
     convertedEventSegment[portNum + 0x0C] = bcdToDecimal(temp);
     //Serial.println("@ Ra");
     Serial.println(convertedEventSegment[portNum]);
@@ -700,6 +704,7 @@ boolean checkPortConfig() {
           calculateOverflow(timerSegment[x], x);
           Serial.println(portOverflowCount[x]);
           timerRequest |= (1 << x); // sets timer request
+          applyConfig = true;
           //Serial.println(timerRequest, HEX);
           timerReset = true;
         }
@@ -707,11 +712,13 @@ boolean checkPortConfig() {
           //Serial.println("@ event");
           convertEventDetailsToDecimal(x);
           eventRequest |= (1 << x); //set event request
+          applyConfig = true;
           //Serial.println(eventRequest, HEX);
         }
         else if (checker == 0x04) { // odm
           Serial.println("@ odm");
           manipulatePortData(x, 0x02); // odm type
+          applyConfig = true;
 
 
           //          commented the following block kasi hindi mo need yun
@@ -754,17 +761,17 @@ void printRegisters() { // prints all variables stored in the sd card
   //    Serial.print(buffer);
   //    Serial.println(configVersion,HEX);
 
-  for (byte x = 0x00; x < PORT_COUNT; x++) {
-    strcpy_P(buffer, (char*)pgm_read_word(&(messages[19])));
-    Serial.print(buffer);
-    Serial.println(portConfigSegment[x], HEX);
-  }
+//  for (byte x = 0x00; x < PORT_COUNT; x++) {
+//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[19])));
+//    Serial.print(buffer);
+//    Serial.println(portConfigSegment[x], HEX);
+//  }
 
-  for (byte x = 0x00; x < PORT_COUNT; x++) {
-    strcpy_P(buffer, (char*)pgm_read_word(&(messages[35])));
-    Serial.print(buffer);
-    Serial.println(actuatorValueTimerSegment[x], HEX);
-  }
+//  for (byte x = 0x00; x < PORT_COUNT; x++) {
+//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[35])));
+//    Serial.print(buffer);
+//    Serial.println(actuatorValueTimerSegment[x], HEX);
+//  }
 
   //  for (byte x = 0x00; x < PORT_COUNT; x++) {
   //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[30])));
@@ -784,11 +791,11 @@ void printRegisters() { // prints all variables stored in the sd card
   //    Serial.println(timerSegment[x], HEX);
   //  }
   //
-  //  for (byte x = 0x00; x < PORT_COUNT * 2; x++) {
-  //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[24])));
-  //    Serial.print(buffer);
-  //    Serial.println(eventSegment[x], HEX);
-  //  }
+    for (byte x = 0x00; x < PORT_COUNT * 2; x++) {
+      strcpy_P(buffer, (char*)pgm_read_word(&(messages[24])));
+      Serial.print(buffer);
+      Serial.println(eventSegment[x], HEX);
+    }
   //
   //  for (byte x = 0x00; x < PORT_COUNT; x++) {
   //    strcpy_P(buffer, (char*)pgm_read_word(&(messages[15])));
@@ -1723,10 +1730,15 @@ void loop() {
           closePacket(packetQueue[packetQueueTail]);
           sendPacketQueue();
           writeConfig();
+          packetTypeFlag = packetTypeFlag & 0xFD; // turn off node config flag
 
           if (timerReset) { // if needs to be reset
+            Serial.println("timerReset");
             initializeTimer();
             timerReset = false;
+          }
+          else{
+            Serial.println("!timerReset");
           }
         } else {
           Serial.println("!config");
