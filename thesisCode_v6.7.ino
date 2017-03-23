@@ -1772,11 +1772,13 @@ void loop() {
           if ((timerGrantMask & timerGrant) == timerGrantMask) { // if set
             manipulatePortData(x, 0x00); //timer
             timerGrant = timerGrant & ~(1 << x); // clear timer grant of bit
-            Serial.println(timerGrant, HEX);
+            timerRequest = timerRequest | (1 << x); //to be able to send again
           }
         }
         Serial.print("End loop timerGrant: ");
         Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
+        Serial.print("End loop timerRequest: ");
+        Serial.println(timerRequest, HEX);// kahit hindi zero kasi interrupt ito
 
       }
       if (eventRequest != 0x00) { // check event request
@@ -1849,20 +1851,20 @@ void loop() {
         Serial.print("End loop eventRequest: ");
         Serial.println(eventRequest, HEX);// dapat zero
       }
-      if (portDataChanged != 0x00) { //to form packet
-        unsigned int portDataChangedMask;
-        for (byte x = 0x00; x < PORT_COUNT; x++) {
-          portDataChangedMask = (1 << x);
-
-          if ((portDataChanged & portDataChangedMask) == portDataChangedMask) { //portData was changed
-            initializePacket(packetQueue[packetQueueTail]);
-            insertToPacket(packetQueue[packetQueueTail], x, portValue[x]);
-            closePacket(packetQueue[packetQueueTail]);
-            portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
-          }
-        }
-
-      }
+//      if (portDataChanged != 0x00) { //to form packet
+//        unsigned int portDataChangedMask;
+//        for (byte x = 0x00; x < PORT_COUNT; x++) {
+//          portDataChangedMask = (1 << x);
+//
+//          if ((portDataChanged & portDataChangedMask) == portDataChangedMask) { //portData was changed
+//            initializePacket(packetQueue[packetQueueTail]);
+//            insertToPacket(packetQueue[packetQueueTail], x, portValue[x]);
+//            closePacket(packetQueue[packetQueueTail]);
+//            portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
+//          }
+//        }
+//
+//      }
     }
   }
 }
