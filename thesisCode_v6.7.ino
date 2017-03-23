@@ -12,10 +12,10 @@
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
 #define PACKET_QUEUE_SIZE 0x0A // Queue for packet
-#define SERIAL_QUEUE_SIZE 0x05 // Queue for serial
+#define SERIAL_QUEUE_SIZE 0x03 // Queue for serial
 #define BUFFER_SIZE 0x37 // bytes queue will hold
 #define MAX_CONFIG_PART 0x05 // receiving config
-#define MAX_ATTEMPT 0x01 // contacting sink
+#define MAX_ATTEMPT 0x03 // contacting sink
 
 int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
 byte errorFlag = 0x00; // bits correspond to an error
@@ -31,7 +31,7 @@ byte configPartNumber = 0x00; // stores the config part last served
 byte configSentPartCtr = 0x00; //config part being read
 boolean timerReset = false; //set when there is time config
 
-unsigned int timeoutVal = 0x2001; //5 seconds
+unsigned int timeoutVal = 0x2010; //5 seconds
 boolean requestConfig = false; // checks if node is requesting config
 
 byte apiCount = 0x01; //API version
@@ -304,7 +304,7 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("conf.log");
+    File configFile = SD.open("coaa.log");
     if (configFile) { // check if exists, if not then no file
       while (configFile.available()) {
         int fileTemp = configFile.read();
@@ -854,26 +854,32 @@ void checkOtherCommands() { // checks if there is still commands
 void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue_Size and buffer size; store to var from serial queue
   byte x = 0x00;
   byte halt = false;
-
+  segmentCounter = 0x00;
+//  printBuffer(serialQueue[serialTail]);
   //  for(byte x = 0x00; x < BUFFER_SIZE; x++){
   while (!halt) {
     //      Serial.print("SGM CTR: ");
     //      Serial.println(segmentCounter, HEX);
     byte data = queue[x];
+//     Serial.print("CTR: ");
+//      Serial.println(segmentCounter, HEX);
+//    Serial.print(data , HEX);
+    
     if (data == 0xFF && segmentCounter == 0x00) {
       segmentCounter = 0x01;
     }
     else if (segmentCounter == 0x01) { //SOURCE
+     
       sourceAddress = data;
       segmentCounter = 0x02;
     }
     else if (segmentCounter == 0x02) { //DESTINATION
       if (data != physicalAddress) { //in case di pala para sa kanya; kasi broadcast mode si xbee; technically drop ze packet
         segmentCounter = 0x00;
-        destAddress = data;
       }
       else {
         segmentCounter = 0x03; //I think.. ilagay nalang yung physical address ni node mismo
+        destAddress = data;
       }
     }
     else if (segmentCounter == 0x03) { //API
@@ -1014,7 +1020,6 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       }
     }
     else if (segmentCounter == 0x0B) { //COMMAND PARAMETER FOR API == 3
-      //      Serial.println("@ Command check");
       if (data == 0x00) { // Request keep alive message
         commandValue = 0x00;
         packetTypeFlag |= 0x04; //set packet type to node discovery
@@ -1044,11 +1049,12 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
         segmentCounter = 0x13; //timer segment
       }
       else if (data == 0x03) {
-        segmentCounter = 0x0E; //logical to actuator value on demand
-      }
-      else if (data == 0x04) {
         segmentCounter = 0x18; // actuator value timer
       }
+      else if (data == 0x04) {
+        segmentCounter = 0x0E; //logical to actuator value on demand
+      }
+      
     }
     else if (segmentCounter == 0x0D) { // ODM - ACTUATOR SEGMENT
       setActuatorValueOnDemandSegment(portNum, data);
@@ -1064,17 +1070,12 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
     }
     else if (segmentCounter == 0x0E) { //API == 3 GET CONFIG - logical address
       logicalAddress  = data;
-
       if (packetTypeFlag && 0x04 == 0x04) { // if node discovery - network config, go to sink node addr
         segmentCounter = 0x16;
       }
       else { // if requesting config
-        segmentCounter = 0x0F;
+        segmentCounter = 0x10;
       }
-    }
-    else if (segmentCounter == 0x0F) { //GET CONFIG - physical
-      physicalAddress = data;
-      segmentCounter = 0x10;
     }
     else if (segmentCounter == 0x10) { //GET CONFIG VERSION
       configVersion = data;
@@ -1224,7 +1225,8 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       //        printRegisters(); // prints all to double check
     }
 
-    if (x == BUFFER_SIZE) {
+    if ((x == BUFFER_SIZE) || (segmentCounter == 0xFF && data == 0xFE)){
+      //max buffer or footer is found
       halt = true;
     }
     else {
@@ -1608,6 +1610,7 @@ void setup() {
   //    }
 
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
+//  printRegisters();
 }
 
 void loop() {
@@ -1619,6 +1622,7 @@ void loop() {
   //Communication module - Receive
   if (Serial.available() > 0) {
     serialData = Serial.read(); // 1 byte
+//    Serial.print(serialData, HEX);
 
     if (serialData == 0xFF) { // serialhead found start reading
       headerFound = true;
@@ -1647,9 +1651,15 @@ void loop() {
         pos = 0;
         serialTail = (serialTail + 0x01) % SERIAL_QUEUE_SIZE; // increment tail
         headerFound = false;
+//        Serial.println("Read");
+//        printQueue(serialQueue, SERIAL_QUEUE_SIZE);
+//        Serial.print("H: ");
+//        Serial.println(serialHead, HEX);
+//        Serial.print("T: ");
+//        Serial.println(serialTail, HEX);
       }
       else {
-        //        Serial.println("Full Queue");
+        Serial.println("Full Queue");
         isFull = true;
         printQueue(serialQueue, SERIAL_QUEUE_SIZE);
         isService = true;
@@ -1657,7 +1667,6 @@ void loop() {
       }
     }
   }
-
   else {
     isService = true;
     if (requestConfig == true)
@@ -1669,6 +1678,7 @@ void loop() {
 
     if (!isEmpty) { // there are messages
       if (serialHead != serialTail) { //checks getting at serial Queue then get
+//        Serial.println("Retr");
         retrieveSerialQueue(serialQueue[serialHead], serialHead);
         serialHead = (serialHead + 0x01) % SERIAL_QUEUE_SIZE; // increment head
       }
@@ -1679,11 +1689,9 @@ void loop() {
         //if the packet is a config packet
         if ((packetTypeFlag & 0x01) == 0x01) { // request startup config
           if (configSentPartCtr == configPartNumber) {
-            configPartNumber = configPartNumber + 0x01; //expect next packet
             attemptCounter = 0x00; //reset it coz may dumating na tama
             packetTypeFlag = packetTypeFlag & 0xFE;
-            //Serial.println(configPartNumber,HEX);
-            if (configPartNumber == MAX_CONFIG_PART) { // if it is max already
+            if (configPartNumber == MAX_CONFIG_PART-1) { // if it is max already
               writeConfig(); //save config
               requestConfig = false;  // turn off request
               attemptCounter = 0xFF; //para hindi magreset yung timer
@@ -1692,6 +1700,7 @@ void loop() {
               formatReplyPacket(packetQueue[packetQueueTail], 0x0C); //acknowledge of full config
               closePacket(packetQueue[packetQueueTail]);
             }
+            configPartNumber = configPartNumber + 0x01; //expect next packet
           }
           else {
             //            if(serialHead != serialTail) { // kasi nag double read siya
