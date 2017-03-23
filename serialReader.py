@@ -36,3 +36,9 @@ while True:
 	data = arduino.readline()[:-2] #removes /r and /n
 	if data:
 		print (data)
+	else:
+		# print('no data')
+		packetCommand = input("Enter command: ")		
+		convertedCommand = convertStringToByteArray(packetCommand)
+		for x in range(0, len(convertedCommand)):
+			arduino.write([convertedCommand[x]])
