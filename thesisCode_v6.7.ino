@@ -911,6 +911,7 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       }
       else { //Current node config is most recent
         segmentCounter = 0x00;
+        errorFlag |= 0x10;
       }
     }
     else if (segmentCounter == 0x05) { // COUNT
