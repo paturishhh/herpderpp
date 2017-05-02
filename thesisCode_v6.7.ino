@@ -10,13 +10,17 @@
 #include <Servo.h>
 
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
-#define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
+#define MAX_COMMAND 0x24 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
 #define PACKET_QUEUE_SIZE 0x0A // Queue for packet
 #define SERIAL_QUEUE_SIZE 0x03 // Queue for serial
 #define BUFFER_SIZE 0x37 // bytes queue will hold
 #define MAX_CONFIG_PART 0x05 // receiving config
 #define MAX_ATTEMPT 0x03 // contacting sink
+#define RED_LED_PIN 2 // for startup error indicators
+#define GREEN_LED_PIN 10 // for startup success indicator
+
+SoftwareSerial xbee(2, 3);
 
 int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
 byte errorFlag = 0x00; // bits correspond to an error
@@ -303,6 +307,7 @@ void loadConfig() { //loads config file and applies it to the registers
     strcpy_P(buffer, (char*)pgm_read_word(&(messages[25])));
     Serial.println(buffer); //error
     errorFlag |= temp;
+    digitalWrite(RED_LED_PIN, HIGH); //sets it to high
   }
   else {
     File configFile = SD.open("conf.log");
@@ -546,6 +551,7 @@ void writeConfig() { // writes node configuration to SD card
     //      strcpy_P(buffer, (char*)pgm_read_word(&(messages[26])));
     //      Serial.println(buffer); //error
     byte temp = 0x08;
+    //PATCH SEND error, requestconfig = false, attempt counter and inactive
     errorFlag |= 0x08; //cannot access sd card or file not found
     Serial.println(errorFlag, HEX);
   }
@@ -565,11 +571,13 @@ void sendPacketQueue() {
   if (packetQueueHead == packetQueueTail) {
     packetQisEmpty = true;
   }
-  if (packetQisEmpty == true && requestConfig == true && attemptCounter == 0x00) {
-    //attempt counter was added since you only need to restart it every time na new
-    initializeTimer();
-    Serial.println("start timeout");
-  }
+
+  //PATCH! para mag restart timer after
+  //  if (packetQisEmpty == true && requestConfig == true && attemptCounter == 0x00) {
+  //    //attempt counter was added since you only need to restart it every time na new
+  //    initializeTimer();
+  //    Serial.println("start timeout");
+  //  }
 }
 
 void manipulatePortData(byte index, byte configType) { //checks port type, actuates and senses accordingly
@@ -895,7 +903,7 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       if (apiCount == 2) { // if CONFIG mode, else iba na ieexpect niya na mga kasama na segment
         segmentCounter = 0x04; // check config version
       }
-      else if (apiCount == 3) { // if Node Discovery Mode, expects  command parameter
+      else if (apiCount == 3) { // expects  command parameter
         segmentCounter = 0x0B; //command parameter
       }
       else { //pero technically dapat error na ito
@@ -1041,7 +1049,7 @@ void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue
       }
       if (data == 0x0E) { // receive configuration
         packetTypeFlag |= 0x01; //set packet type to a startup config
-        commandValue = 0x0E; //sets 1st bit to indicate a config is coming
+        commandValue = 0x0E;
         segmentCounter = 0x0C; //check how many parts
       }
     }
@@ -1482,6 +1490,9 @@ void checkTimeout() {
       attemptIsSet = false;
       //      Serial.println("Again!!");
       sendPacketQueue();
+
+      //PATCH! TO RESTART TIMEOUT AGAIN
+      initializeTimer();
     }
     else { // max reached
       attemptCounter = 0x00; // reset
@@ -1500,56 +1511,59 @@ ISR(TIMER2_OVF_vect) {
     attemptCounter = attemptCounter + 0x01; // increment counter
     attemptIsSet = true;
   }
-  if (((timeCtr % portOverflowCount[0]) == 0) && ((timerRequest & 0x0001) == 0x0001)) { //if it is time and there is a request
-    timerGrant |= (1 << 0); // turn on grant
-    //    timerGrant |= 0x01;
-    Serial.println(timerGrant, HEX);
-    timerRequest = timerRequest & (1 << 0); // turn off request flag
-    Serial.println(timerRequest, HEX);
-  }
-  if (((timeCtr % portOverflowCount[1]) == 0) && ((timerRequest & 0x0002) == 0x0002)) {
-    timerGrant |= (1 << 1);
-    timerRequest = timerRequest & (1 << 1);
-  }
-  if (((timeCtr % portOverflowCount[2]) == 0) && ((timerRequest & 0x0004) == 0x0004)) {
-    timerGrant |= (1 << 2);
-    timerRequest = timerRequest & (1 << 2);
-  }
-  if (((timeCtr % portOverflowCount[3]) == 0) && ((timerRequest & 0x0008) == 0x0008)) {
-    timerGrant |= (1 << 3);
-    timerRequest = timerRequest & (1 << 3);
-  }
-  if (((timeCtr % portOverflowCount[4]) == 0) && ((timerRequest & 0x0010) == 0x0010)) {
-    timerGrant |= (1 << 4);
-    timerRequest = timerRequest & (1 << 4);
-  }
-  if (((timeCtr % portOverflowCount[5]) == 0) && ((timerRequest & 0x0020) == 0x0020)) {
-    timerGrant |= (1 << 5);
-    timerRequest = timerRequest & (1 << 5);
-  }
-  if (((timeCtr % portOverflowCount[6]) == 0) && ((timerRequest & 0x0040) == 0x0040)) {
-    timerGrant |= (1 << 6);
-    timerRequest = timerRequest & (1 << 6);
-  }
-  if (((timeCtr % portOverflowCount[7]) == 0) && ((timerRequest & 0x0080) == 0x0080)) {
-    timerGrant |= (1 << 7);
-    timerRequest = timerRequest & (1 << 7);
-  }
-  if (((timeCtr % portOverflowCount[8]) == 0) && ((timerRequest & 0x0100) == 0x0100)) {
-    timerGrant |= (1 << 8);
-    timerRequest = timerRequest & (1 << 8);
-  }
-  if (((timeCtr % portOverflowCount[9]) == 0) && ((timerRequest & 0x0200) == 0x0200)) {
-    timerGrant |= (1 << 9);
-    timerRequest = timerRequest & ~(1 << 9);
-  }
-  if (((timeCtr % portOverflowCount[0x0A]) == 0) && ((timerRequest & 0x0400) == 0x0400)) {
-    timerGrant |= (1 << 0x0A);
-    timerRequest = timerRequest & (1 << 0x0A);
-  }
-  if (((timeCtr % portOverflowCount[0x0B]) == 0) && ((timerRequest & 0x0800) == 0x0800)) {
-    timerGrant |= (1 << 0x0B);
-    timerRequest = timerRequest & (1 << 0x0B);
+  //3/27/17 PATCH ADDED !REQUEST CONFIG kasi mag ccheck padin siya kahit nagrerequest siya
+  if (requestConfig != true) {
+    if (((timeCtr % portOverflowCount[0]) == 0) && ((timerRequest & 0x0001) == 0x0001)) { //if it is time and there is a request
+      timerGrant |= (1 << 0); // turn on grant
+      //    timerGrant |= 0x01;
+      Serial.println(timerGrant, HEX);
+      timerRequest = timerRequest & (1 << 0); // turn off request flag
+      Serial.println(timerRequest, HEX);
+    }
+    if (((timeCtr % portOverflowCount[1]) == 0) && ((timerRequest & 0x0002) == 0x0002)) {
+      timerGrant |= (1 << 1);
+      timerRequest = timerRequest & (1 << 1);
+    }
+    if (((timeCtr % portOverflowCount[2]) == 0) && ((timerRequest & 0x0004) == 0x0004)) {
+      timerGrant |= (1 << 2);
+      timerRequest = timerRequest & (1 << 2);
+    }
+    if (((timeCtr % portOverflowCount[3]) == 0) && ((timerRequest & 0x0008) == 0x0008)) {
+      timerGrant |= (1 << 3);
+      timerRequest = timerRequest & (1 << 3);
+    }
+    if (((timeCtr % portOverflowCount[4]) == 0) && ((timerRequest & 0x0010) == 0x0010)) {
+      timerGrant |= (1 << 4);
+      timerRequest = timerRequest & (1 << 4);
+    }
+    if (((timeCtr % portOverflowCount[5]) == 0) && ((timerRequest & 0x0020) == 0x0020)) {
+      timerGrant |= (1 << 5);
+      timerRequest = timerRequest & (1 << 5);
+    }
+    if (((timeCtr % portOverflowCount[6]) == 0) && ((timerRequest & 0x0040) == 0x0040)) {
+      timerGrant |= (1 << 6);
+      timerRequest = timerRequest & (1 << 6);
+    }
+    if (((timeCtr % portOverflowCount[7]) == 0) && ((timerRequest & 0x0080) == 0x0080)) {
+      timerGrant |= (1 << 7);
+      timerRequest = timerRequest & (1 << 7);
+    }
+    if (((timeCtr % portOverflowCount[8]) == 0) && ((timerRequest & 0x0100) == 0x0100)) {
+      timerGrant |= (1 << 8);
+      timerRequest = timerRequest & (1 << 8);
+    }
+    if (((timeCtr % portOverflowCount[9]) == 0) && ((timerRequest & 0x0200) == 0x0200)) {
+      timerGrant |= (1 << 9);
+      timerRequest = timerRequest & ~(1 << 9);
+    }
+    if (((timeCtr % portOverflowCount[0x0A]) == 0) && ((timerRequest & 0x0400) == 0x0400)) {
+      timerGrant |= (1 << 0x0A);
+      timerRequest = timerRequest & (1 << 0x0A);
+    }
+    if (((timeCtr % portOverflowCount[0x0B]) == 0) && ((timerRequest & 0x0800) == 0x0800)) {
+      timerGrant |= (1 << 0x0B);
+      timerRequest = timerRequest & (1 << 0x0B);
+    }
   }
 }
 
@@ -1564,6 +1578,9 @@ void initializeTimer() {
   TCCR2B |= (1 << CS22) | (1 << CS21) | (1 << CS20); // set prescaler to 1024
   TIMSK2 |= (1 << TOIE2); //enable interrupt to overflow
   sei(); //enable global interrupts
+
+  //PATCH! TIMER CTR RESET EVERYTIME INITIALIZE TIMER
+  timeCtr = 0x00;
 }
 
 void setup() {
@@ -1573,7 +1590,8 @@ void setup() {
   pinMode(6, OUTPUT);
   pinMode(7, OUTPUT);
   pinMode(8, OUTPUT);
-  pinMode(9, OUTPUT);
+  pinMode(RED_LED_PIN, OUTPUT);
+  pinMode(GREEN_LED_PIN, OUTPUT);
 
   //setting to low
   digitalWrite(4, LOW);
@@ -1587,7 +1605,9 @@ void setup() {
   digitalWrite(CS_PIN, HIGH);
 
   // to initiate serial communication
-  Serial.begin(9600);
+  //  Serial.begin(9600);
+  // initiate xbee
+  xbee.begin(9600);
   timeCtr = 0;
 
   // NOTE: AVOID PUTTING STUFF ON PIN 0 & 1 coz that is where serial is (programming, debugging)
@@ -1703,16 +1723,24 @@ void loop() {
             if (configPartNumber == MAX_CONFIG_PART - 1) { // if it is max already
               writeConfig(); //save config
               requestConfig = false;  // turn off request
-              attemptCounter = 0xFF; //para hindi magreset yung timer
+              //PATCH! REMOVED THIS
+              //              attemptCounter = 0xFF; //para hindi magreset yung timer
               configPartNumber = 0x00;
               initializePacket(packetQueue[packetQueueTail]);
               formatReplyPacket(packetQueue[packetQueueTail], 0x0C); //acknowledge of full config
               closePacket(packetQueue[packetQueueTail]);
             }
+            //PATCH! ELSE TO RESTART TIMEOUT
+            else {
+              initializeTimer();
+            }
+
             configPartNumber = configPartNumber + 0x01; //expect next packet
           }
           else {
             //            if(serialHead != serialTail) { // kasi nag double read siya
+            //PATCH! reset attempt count and format error packet
+            attemptCounter = 0x00;
             Serial.println("broken config");
             errorFlag |= 0x04;
             //            }
@@ -1851,20 +1879,20 @@ void loop() {
         Serial.print("End loop eventRequest: ");
         Serial.println(eventRequest, HEX);// dapat zero
       }
-//      if (portDataChanged != 0x00) { //to form packet
-//        unsigned int portDataChangedMask;
-//        for (byte x = 0x00; x < PORT_COUNT; x++) {
-//          portDataChangedMask = (1 << x);
-//
-//          if ((portDataChanged & portDataChangedMask) == portDataChangedMask) { //portData was changed
-//            initializePacket(packetQueue[packetQueueTail]);
-//            insertToPacket(packetQueue[packetQueueTail], x, portValue[x]);
-//            closePacket(packetQueue[packetQueueTail]);
-//            portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
-//          }
-//        }
-//
-//      }
+      //      if (portDataChanged != 0x00) { //to form packet
+      //        unsigned int portDataChangedMask;
+      //        for (byte x = 0x00; x < PORT_COUNT; x++) {
+      //          portDataChangedMask = (1 << x);
+      //
+      //          if ((portDataChanged & portDataChangedMask) == portDataChangedMask) { //portData was changed
+      //            initializePacket(packetQueue[packetQueueTail]);
+      //            insertToPacket(packetQueue[packetQueueTail], x, portValue[x]);
+      //            closePacket(packetQueue[packetQueueTail]);
+      //            portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
+      //          }
+      //        }
+      //
+      //      }
     }
   }
 }
