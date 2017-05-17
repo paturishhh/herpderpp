@@ -7,13 +7,13 @@
 #include <avr/interrupt.h>
 #include <math.h>
 #include <Servo.h>
-
+boolean derp = true;
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
-#define PACKET_QUEUE_SIZE 0x0A // Queue for packet
-#define SERIAL_QUEUE_SIZE 0x03 // Queue for serial
-#define BUFFER_SIZE 0x37 // bytes queue will hold
+#define PACKET_QUEUE_SIZE 0x03 // Queue for packet
+#define SERIAL_QUEUE_SIZE 0x05 // Queue for serial
+#define BUFFER_SIZE 0x37 // bytes queue will hold 0x37
 #define MAX_CONFIG_PART 0x05 // receiving config
 #define MAX_ATTEMPT 0x03 // contacting sink
 
@@ -38,7 +38,7 @@ byte apiCount = 0x01; //API version
 byte commandCount = 0x00; //command being served (at retrieve)
 byte commandCounter = 0x00; //commandCounter for commands; for receiving (@ receive)
 byte packetCommandCounter = 0x00; //command counter where count will be placed @ packet
-byte packetPos = 0x05; //position of packet; default at command na
+byte packetPos = 0x06; //position of packet; default at command na
 
 unsigned int eventRegister = 0x0000; // if set, event happened; 0-15
 unsigned int onDemandRegister = 0x0000; // if set, then there is an odm; 0-15
@@ -191,37 +191,6 @@ void initializePacket(byte pQueue[]) { // one row //adds necessary stuff at init
   pQueue[3] = 0x03; //api used to reply is currently 3
 }
 
-void insertToPacket(byte pQueue[], byte portNumber, unsigned int portData) { // for port data
-  //command, count, port num, port value
-  //adds count for each command
-  //checks if equal to buffersize - 2 (coz may footer pa)
-  pQueue[5] = 0x0F; //command
-
-  if ((packetPos != (BUFFER_SIZE - 2)) && ((packetPos + 0x03) <= (BUFFER_SIZE - 2))) { //if not full and kapag nilagay mo dapat hindi mapupuno
-    packetPos = packetPos + 0x01;//packetPos starts at command's pos
-    pQueue[packetPos] = portNumber;
-    packetPos = packetPos + 0x01;
-    pQueue[packetPos] = highByte(portValue[portNumber]);
-    packetPos = packetPos + 0x01;
-    pQueue[packetPos] = lowByte(portValue[portNumber]);
-    packetCommandCounter = packetCommandCounter + 0x01; //increment count
-  }
-  else { //puno na or hindi na kasya
-    //    Serial.print("Con1: ");
-    //    Serial.println((packetPos!= (BUFFER_SIZE-2)));
-    //    Serial.print("Con2: ");
-    //    Serial.println((packetPos + 0x03) <= (BUFFER_SIZE-2));
-    closePacket(packetQueue[packetQueueTail]);
-    if (packetQueueHead != packetQueueTail) { //if queue is not full{
-      initializePacket(packetQueue[packetQueueTail]); //create new packet
-      insertToPacket(pQueue, portNumber, portData);
-    }
-    else { //queue is full
-      sendPacketQueue();
-    }
-  }
-}
-
 //insert count @ packet
 //pQueue[4] = (packetCommandCounter - 0x01);
 //if port data pinapadala
@@ -231,13 +200,42 @@ void insertToPacket(byte pQueue[], byte portNumber, unsigned int portData) { // 
 
 void closePacket(byte pQueue[]) {
   if (packetCommandCounter != 0x00) { //possibly sending portData
-    pQueue[4] = packetCommandCounter;
-    Serial.println("port data cnt");
+    pQueue[4] = packetCommandCounter-1; //to remove offset
   }
   pQueue[packetPos] = 0xFE; //footer
-  packetPos = 0x05;
+  packetPos = 0x06;
   packetCommandCounter = 0x00; //reset command counter
   packetQueueTail = (packetQueueTail + 0x01) % PACKET_QUEUE_SIZE; // point to next in queue
+}
+
+void insertToPacket(byte pQueue[], byte portNumber) { // for port data
+  //command, count, port num, port value
+  //adds count for each command
+  //checks if equal to buffersize - 2 (coz may footer pa)
+  pQueue[5] = 0x0F; //command
+  if ((packetPos != (BUFFER_SIZE - 2)) && ((packetPos + 0x03) <= (BUFFER_SIZE - 2))) { //if not full and kapag nilagay mo dapat hindi mapupuno
+//    packetPos = packetPos + 0x01;//packetPos starts at command's pos
+    pQueue[packetPos] = portNumber;
+    packetPos = packetPos + 0x01;
+    pQueue[packetPos] = highByte(0x1234);
+    packetPos = packetPos + 0x01;
+    pQueue[packetPos] = lowByte(0x1234);
+    packetCommandCounter = packetCommandCounter + 0x01; //increment count
+    packetPos = packetPos + 0x01;
+  }
+  else { //puno na or hindi na kasya
+    
+    closePacket(packetQueue[packetQueueTail]);
+    if (packetQueueHead != packetQueueTail) { //if queue is not full
+      packetPos = 0x06;
+      initializePacket(packetQueue[packetQueueTail]); //create new packet
+      insertToPacket(packetQueue[packetQueueTail], portNumber);
+//      packetPos = packetPos + 0x01;
+    }
+    else { //queue is full
+      sendPacketQueue();
+    }
+  }
 }
 
 void formatReplyPacket(byte pQueue[], byte command) { // format reply with command param only
@@ -596,6 +594,8 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
         digitalWrite(index + 0x04, HIGH);
       }
       portValue[index] = digitalRead(index + 0x04);
+      Serial.print("Port VALUE");
+      Serial.println(portValue[index],HEX);
     }
     else if (index >= 0x06) { //analog actuator
 
@@ -690,12 +690,10 @@ boolean checkPortConfig() {
     //    Serial.println(configChangeRegister & bitMask, HEX);
     if ((configChangeRegister & bitMask) == bitMask) { // config was changed
       byte temp = portConfigSegment[x];
-      Serial.print("full port config");
-      Serial.println(temp, HEX);
-      configType = temp & 0x0F; // get all config
-      Serial.print("configType: ");
-      Serial.println(configType, HEX); // bakit siya pumapasok sa lahat ng if?
-
+//      Serial.print("full port config");
+//      Serial.println(temp, HEX);
+      configType = temp & 0x07; // get all config
+      
       while (configCheck != 0x03) { //checks if config is sent per pin
         byte checker = (configType & (1 << configCheck));
         if (checker == 0x01) { // time based
@@ -703,17 +701,19 @@ boolean checkPortConfig() {
           //Serial.print("timerSeg: ");
           //Serial.println(timerSegment[portNum], HEX);
           calculateOverflow(timerSegment[x], x);
-          Serial.println(portOverflowCount[x]);
+//          Serial.println(portOverflowCount[x]);
           timerRequest |= (1 << x); // sets timer request
           applyConfig = true;
           //Serial.println(timerRequest, HEX);
           timerReset = true;
+          configChangeRegister = configChangeRegister & ~bitMask; //turns off config changed flag
         }
         else if (checker == 0x02) { // event
           //Serial.println("@ event");
           convertEventDetailsToDecimal(x);
           eventRequest |= (1 << x); //set event request
           applyConfig = true;
+          configChangeRegister = configChangeRegister & ~bitMask; //turns off config changed flag
           //Serial.println(eventRequest, HEX);
         }
         else if (checker == 0x04) { // odm
@@ -739,8 +739,8 @@ boolean checkPortConfig() {
       }
       configCheck = 0x00; // reset again
     }
-    else {
-      Serial.println("skipped");
+    else { // config was not changed
+//      Serial.println("skipped");
     }
   }
   Serial.print("End of port config flag: ");
@@ -928,9 +928,8 @@ void retrieveSerialQueue(byte queue[], byte head) {
       //        Serial.println(buffer);
       portNum = 0xF0 & data; // to get port number; @ upper byte
       portNum = portNum >> 4; // move it to the right
-      configChangeRegister |= (1 << portNum);
-      Serial.print("NEW configChange: ");
-      Serial.println(configChangeRegister, HEX);
+      configChangeRegister |= (1 << portNum); // to inform which ports was changed
+      
       setPortConfigSegment(portNum, data); // stored to port config segment
       tempModeStorage = data & 0x07; // stores the modes sent; @ lower byte
 
@@ -1183,8 +1182,8 @@ void retrieveSerialQueue(byte queue[], byte head) {
       segmentCounter = 0xFF;
     }
     else if (segmentCounter == 0x17) { // TIMER - ACTUATOR SEGMENT
-      Serial.print("PC: ");
-      Serial.println(partCounter, HEX);
+//      Serial.print("PC: ");
+//      Serial.println(partCounter, HEX);
       setActuatorValueTimerSegment(portNum, data);
 
       if (partCounter == 0x01) { // if last part
@@ -1691,7 +1690,7 @@ void loop() {
     isService = false;
 
     if (!isEmpty) { // there are messages
-      retrieveSerialQueue(serialQueue[serialHead], serialHead); //get message & store to variables
+      retrieveSerialQueue(serialQueue[serialHead], serialHead); //get message, store to variables, setting flags
       serialHead = (serialHead + 0x01) % SERIAL_QUEUE_SIZE; // increment head
       if (serialHead == serialTail) { //check if empty
         isEmpty = true;
@@ -1767,7 +1766,7 @@ void loop() {
       }
       sendPacketQueue();
     }
-    else { //main loop if no message (sensing and actuating)
+    else { //main loop if no message (checking flags)
             
       if(timerGrant != 0x00){ //check timer grant
 //        Serial.println("Timer Grant");
@@ -1860,17 +1859,56 @@ void loop() {
       }
       if (portDataChanged != 0x00) { //to form packet
         unsigned int portDataChangedMask;
-        for (byte x = 0x00; x < PORT_COUNT; x++) {
+        initializePacket(packetQueue[packetQueueTail]);
+        
+        for (byte x = 0x00; x < PORT_COUNT; x++) { //find which port was changed
           portDataChangedMask = (1 << x);
 
           if ((portDataChanged & portDataChangedMask) == portDataChangedMask) { //portData was changed
-            initializePacket(packetQueue[packetQueueTail]);
-            insertToPacket(packetQueue[packetQueueTail], x, portValue[x]);
-            closePacket(packetQueue[packetQueueTail]);
+            insertToPacket(packetQueue[packetQueueTail], x);
             portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
           }
         }
+        closePacket(packetQueue[packetQueueTail]);
+      }
 
+
+      //test if sending data is exceeding buffer size 
+      while(derp){
+      initializePacket(packetQueue[packetQueueTail]);
+      insertToPacket(packetQueue[packetQueueTail], 0x01);
+      insertToPacket(packetQueue[packetQueueTail], 0x02);
+      insertToPacket(packetQueue[packetQueueTail], 0x03);
+      insertToPacket(packetQueue[packetQueueTail], 0x04);
+      insertToPacket(packetQueue[packetQueueTail], 0x05);
+      insertToPacket(packetQueue[packetQueueTail], 0x06);
+      insertToPacket(packetQueue[packetQueueTail], 0x07);
+      insertToPacket(packetQueue[packetQueueTail], 0x08);
+      insertToPacket(packetQueue[packetQueueTail], 0x09);
+      insertToPacket(packetQueue[packetQueueTail], 0x0A);
+      insertToPacket(packetQueue[packetQueueTail], 0x0B);
+      insertToPacket(packetQueue[packetQueueTail], 0x0C);
+      insertToPacket(packetQueue[packetQueueTail], 0x0D);
+      insertToPacket(packetQueue[packetQueueTail], 0x0E);
+      insertToPacket(packetQueue[packetQueueTail], 0x0F);
+      insertToPacket(packetQueue[packetQueueTail], 0x11);
+      insertToPacket(packetQueue[packetQueueTail], 0x12);
+      insertToPacket(packetQueue[packetQueueTail], 0x13);
+      insertToPacket(packetQueue[packetQueueTail], 0x14);
+      insertToPacket(packetQueue[packetQueueTail], 0x15);
+      insertToPacket(packetQueue[packetQueueTail], 0x16);
+      insertToPacket(packetQueue[packetQueueTail], 0x17);
+      insertToPacket(packetQueue[packetQueueTail], 0x18);
+      insertToPacket(packetQueue[packetQueueTail], 0x19);
+      insertToPacket(packetQueue[packetQueueTail], 0x1A);
+      insertToPacket(packetQueue[packetQueueTail], 0x1B);
+      insertToPacket(packetQueue[packetQueueTail], 0x1C);
+      insertToPacket(packetQueue[packetQueueTail], 0x1D);
+      insertToPacket(packetQueue[packetQueueTail], 0x1E);
+      insertToPacket(packetQueue[packetQueueTail], 0x1F);
+      closePacket(packetQueue[packetQueueTail]);
+      sendPacketQueue();
+      derp = false;
       }
     }
   }
