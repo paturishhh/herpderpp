@@ -55,8 +55,8 @@ unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment
 unsigned int actuatorValueTimerSegment[(int) PORT_COUNT]; // stores data to write on actuator if timer
 unsigned int portDataChanged; // stores if the data is changed
 unsigned int eventRequest = 0x0000; //if event is requested at port
-unsigned int timerRequest = 0x0000; // if timer is requested at port
-unsigned int timerGrant = 0x0000; // if timer is granted at port
+volatile unsigned int timerRequest = 0x0000; // if timer is requested at port
+volatile unsigned int timerGrant = 0x0000; // if timer is granted at port
 
 byte segmentCounter = 0x00;  // counter for parsing the parts of the packet
 byte tempModeStorage = 0x00; // stores the port config 00-07
@@ -304,8 +304,8 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("con.log");
-    if (configFile) { // check if exists, if not then no file
+    File configFile = SD.open("conf.log");
+    if (configFile) { // check if there is saved config
       while (configFile.available()) {
         int fileTemp = configFile.read();
         //reads the file per byte, in the case of the int (2 bytes) it is divided into 2 parts, hiByte and loByte.
@@ -609,6 +609,7 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     else if (index >= 0x06) { // analog sensor
 
     }
+    timerRequest = timerRequest | (1 << index); //to be able to send again
   }
   portDataChanged |= (1 << index); //set port data changed
 }
@@ -858,7 +859,7 @@ void checkOtherCommands() { // checks if there is still commands
   }
 }
 
-void retrieveSerialQueue(byte queue[], byte head) { //  you can remove the queue_Size and buffer size; store to var from serial queue
+void retrieveSerialQueue(byte queue[], byte head) {
   byte x = 0x00;
   byte halt = false;
   segmentCounter = 0x00;
@@ -1504,53 +1505,56 @@ ISR(TIMER2_OVF_vect) {
   if (((timeCtr % portOverflowCount[0]) == 0) && ((timerRequest & 0x0001) == 0x0001)) { //if it is time and there is a request
     timerGrant |= (1 << 0); // turn on grant
     //    timerGrant |= 0x01;
-    Serial.println(timerGrant, HEX);
-    timerRequest = timerRequest & (1 << 0); // turn off request flag
-    Serial.println(timerRequest, HEX);
+//    Serial.println(portOverflowCount[0],HEX);
+//    Serial.println(timeCtr);
+//    Serial.print("G: ");
+//    Serial.println(timerGrant, HEX);
+    timerRequest = timerRequest & ~(1 << 0); // turn off request flag
+//    Serial.println(timerRequest, HEX);
   }
   if (((timeCtr % portOverflowCount[1]) == 0) && ((timerRequest & 0x0002) == 0x0002)) {
     timerGrant |= (1 << 1);
-    timerRequest = timerRequest & (1 << 1);
+    timerRequest = timerRequest & ~(1 << 1);
   }
   if (((timeCtr % portOverflowCount[2]) == 0) && ((timerRequest & 0x0004) == 0x0004)) {
     timerGrant |= (1 << 2);
-    timerRequest = timerRequest & (1 << 2);
+    timerRequest = timerRequest & ~(1 << 2);
   }
   if (((timeCtr % portOverflowCount[3]) == 0) && ((timerRequest & 0x0008) == 0x0008)) {
     timerGrant |= (1 << 3);
-    timerRequest = timerRequest & (1 << 3);
+    timerRequest = timerRequest & ~(1 << 3);
   }
   if (((timeCtr % portOverflowCount[4]) == 0) && ((timerRequest & 0x0010) == 0x0010)) {
     timerGrant |= (1 << 4);
-    timerRequest = timerRequest & (1 << 4);
+    timerRequest = timerRequest & ~(1 << 4);
   }
   if (((timeCtr % portOverflowCount[5]) == 0) && ((timerRequest & 0x0020) == 0x0020)) {
     timerGrant |= (1 << 5);
-    timerRequest = timerRequest & (1 << 5);
+    timerRequest = timerRequest & ~(1 << 5);
   }
   if (((timeCtr % portOverflowCount[6]) == 0) && ((timerRequest & 0x0040) == 0x0040)) {
     timerGrant |= (1 << 6);
-    timerRequest = timerRequest & (1 << 6);
+    timerRequest = timerRequest & ~(1 << 6);
   }
   if (((timeCtr % portOverflowCount[7]) == 0) && ((timerRequest & 0x0080) == 0x0080)) {
     timerGrant |= (1 << 7);
-    timerRequest = timerRequest & (1 << 7);
+    timerRequest = timerRequest & ~(1 << 7);
   }
   if (((timeCtr % portOverflowCount[8]) == 0) && ((timerRequest & 0x0100) == 0x0100)) {
     timerGrant |= (1 << 8);
-    timerRequest = timerRequest & (1 << 8);
+    timerRequest = timerRequest & ~(1 << 8);
   }
   if (((timeCtr % portOverflowCount[9]) == 0) && ((timerRequest & 0x0200) == 0x0200)) {
     timerGrant |= (1 << 9);
-    timerRequest = timerRequest & (1 << 9);
+    timerRequest = timerRequest & ~(1 << 9);
   }
   if (((timeCtr % portOverflowCount[0x0A]) == 0) && ((timerRequest & 0x0400) == 0x0400)) {
     timerGrant |= (1 << 0x0A);
-    timerRequest = timerRequest & (1 << 0x0A);
+    timerRequest = timerRequest & ~(1 << 0x0A);
   }
   if (((timeCtr % portOverflowCount[0x0B]) == 0) && ((timerRequest & 0x0800) == 0x0800)) {
     timerGrant |= (1 << 0x0B);
-    timerRequest = timerRequest & (1 << 0x0B);
+    timerRequest = timerRequest & ~(1 << 0x0B);
   }
 }
 
@@ -1687,12 +1691,13 @@ void loop() {
     isService = false;
 
     if (!isEmpty) { // there are messages
-      retrieveSerialQueue(serialQueue[serialHead], serialHead); //get message
+      retrieveSerialQueue(serialQueue[serialHead], serialHead); //get message & store to variables
       serialHead = (serialHead + 0x01) % SERIAL_QUEUE_SIZE; // increment head
       if (serialHead == serialTail) { //check if empty
         isEmpty = true;
       }
-      
+      //insert checking muna here
+      //this is processing na like waiting for the next part number, formatting replies
       if (requestConfig == true) { //if it is waiting for config
         //if the packet is a config packet
         if ((packetTypeFlag & 0x01) == 0x01) { // request startup config
@@ -1762,24 +1767,27 @@ void loop() {
       }
       sendPacketQueue();
     }
-    else { //main loop if no message
-      //      Serial.println("Check Timer Grant");
-      //      if(timerGrant != 0x00){ //check timer grant
-      //        unsigned int timerGrantMask = 0x00;
-      //
-      //        for (byte x = 0x00; x < PORT_COUNT; x++){
-      //          timerGrantMask = (timerGrantMask << x);
-      //
-      //          if(timerGrantMask & timerGrant == timerGrantMask){ // if set
-      //            manipulatePortData(x,0x00); //timer
-      //            timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
-      //            Serial.println(timerGrant, HEX);
-      //          }
-      //        }
-      //        Serial.print("End loop timerGrant: ");
-      //        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
-      //
-      //      }
+    else { //main loop if no message (sensing and actuating)
+            
+      if(timerGrant != 0x00){ //check timer grant
+//        Serial.println("Timer Grant");
+        Serial.print("@main");
+        Serial.println(timerGrant,HEX);
+        unsigned int timerGrantMask = 0x00;
+
+        for (byte x = 0x00; x < PORT_COUNT; x++){
+          timerGrantMask = (1 << x); 
+
+          if((timerGrantMask & timerGrant) == timerGrantMask){ // if set
+            manipulatePortData(x,0x00); //timer
+            timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
+//            Serial.println(timerGrant, HEX);
+          }
+        }
+//        Serial.print("End loop timerGrant: ");
+//        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
+
+      }
       if (eventRequest != 0x00) { // check event request
 
         unsigned int eventRequestMask = 0x0000;
