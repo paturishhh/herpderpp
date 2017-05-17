@@ -571,8 +571,8 @@ void sendPacketQueue() {
   }
 }
 
-void manipulatePortData(byte index, byte configType) { //checks port type, actuates and senses accordingly
-  //configType is to know where to get actuator value
+void manipulatePortData(byte index, byte configType) { //checks port type, actuates and senses accordingly 
+  //configType is to know where to get actuator value (can be hardcoded but you can get it from portconfigsegment din)
   unsigned int actuatorValue = 0x0000;
 
   if ((portConfigSegment[index] & 0x08) == 0x08) { //actuator
@@ -1771,8 +1771,8 @@ void loop() {
             
       if(timerGrant != 0x00){ //check timer grant
 //        Serial.println("Timer Grant");
-        Serial.print("@main");
-        Serial.println(timerGrant,HEX);
+//        Serial.print("@main");
+//        Serial.println(timerGrant,HEX);
         unsigned int timerGrantMask = 0x00;
 
         for (byte x = 0x00; x < PORT_COUNT; x++){
