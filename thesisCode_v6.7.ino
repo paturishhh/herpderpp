@@ -7,7 +7,7 @@
 #include <avr/interrupt.h>
 #include <math.h>
 #include <Servo.h>
-boolean derp = true;
+//boolean derp = true;
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
@@ -202,6 +202,7 @@ void closePacket(byte pQueue[]) {
   if (packetCommandCounter != 0x00) { //possibly sending portData
     pQueue[4] = packetCommandCounter-1; //to remove offset
   }
+  
   pQueue[packetPos] = 0xFE; //footer
   packetPos = 0x06;
   packetCommandCounter = 0x00; //reset command counter
@@ -217,9 +218,9 @@ void insertToPacket(byte pQueue[], byte portNumber) { // for port data
 //    packetPos = packetPos + 0x01;//packetPos starts at command's pos
     pQueue[packetPos] = portNumber;
     packetPos = packetPos + 0x01;
-    pQueue[packetPos] = highByte(0x1234);
+    pQueue[packetPos] = highByte(portValue[portNumber]);
     packetPos = packetPos + 0x01;
-    pQueue[packetPos] = lowByte(0x1234);
+    pQueue[packetPos] = lowByte(portValue[portNumber]);
     packetCommandCounter = packetCommandCounter + 0x01; //increment count
     packetPos = packetPos + 0x01;
   }
@@ -302,7 +303,7 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("conf.log");
+    File configFile = SD.open("con.log");
     if (configFile) { // check if there is saved config
       while (configFile.available()) {
         int fileTemp = configFile.read();
@@ -594,8 +595,8 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
         digitalWrite(index + 0x04, HIGH);
       }
       portValue[index] = digitalRead(index + 0x04);
-      Serial.print("Port VALUE");
-      Serial.println(portValue[index],HEX);
+//      Serial.print("Port VALUE");
+//      Serial.println(portValue[index],HEX);
     }
     else if (index >= 0x06) { //analog actuator
 
@@ -612,6 +613,8 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     timerRequest = timerRequest | (1 << index); //to be able to send again
   }
   portDataChanged |= (1 << index); //set port data changed
+  Serial.print("data change: ");
+  Serial.println(portDataChanged,HEX);
 }
 
 void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
@@ -646,35 +649,35 @@ boolean checkEventCondition(byte eventCondition, int tempPortValue, int eventVal
 
   if (eventCondition == 0x00) { //less than not equal
     // portData < eventValue
-    if (tempPortValue < eventValue) {
-      conditionReached = true;
+      if (tempPortValue < eventValue) {
+        conditionReached = true;
+      }
+      Serial.println("<");
     }
-    Serial.println("<");
-  }
-  else if (eventCondition == 0x01) { // less than equal
-    //portData <= eventValue
-    if (tempPortValue <= eventValue) {
-      conditionReached = true;
+    else if (eventCondition == 0x01) { // less than equal
+      //portData <= eventValue
+      if (tempPortValue <= eventValue) {
+        conditionReached = true;
+      }
+      Serial.println("<=");
     }
-    Serial.println("<=");
-  }
-  else if (eventCondition == 0x02) { // greater than not equal
-    // portData > eventValue
-    if (tempPortValue > eventValue) {
-      conditionReached = true;
+    else if (eventCondition == 0x02) { // greater than not equal
+      // portData > eventValue
+      if (tempPortValue > eventValue) {
+        conditionReached = true;
+      }
+      Serial.println(">");
     }
-    Serial.println(">");
-  }
-  else if (eventCondition == 0x03) { // greater than equal
-    // portData >= eventValue
-    if (tempPortValue >= eventValue) {
-      conditionReached = true;
+    else if (eventCondition == 0x03) { // greater than equal
+      // portData >= eventValue
+      if (tempPortValue >= eventValue) {
+        conditionReached = true;
+      }
+      Serial.println(">=");
     }
-    Serial.println(">=");
+  
+    return conditionReached;
   }
-
-  return conditionReached;
-}
 
 boolean checkPortConfig() {
   unsigned int actuatorValue;
@@ -697,7 +700,7 @@ boolean checkPortConfig() {
       while (configCheck != 0x03) { //checks if config is sent per pin
         byte checker = (configType & (1 << configCheck));
         if (checker == 0x01) { // time based
-          //Serial.println("@ time!");
+          Serial.println("@ time!");
           //Serial.print("timerSeg: ");
           //Serial.println(timerSegment[portNum], HEX);
           calculateOverflow(timerSegment[x], x);
@@ -1867,49 +1870,54 @@ void loop() {
           if ((portDataChanged & portDataChangedMask) == portDataChangedMask) { //portData was changed
             insertToPacket(packetQueue[packetQueueTail], x);
             portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
+            Serial.print("data change after send: ");
+            Serial.println(portDataChanged,HEX);
           }
         }
         closePacket(packetQueue[packetQueueTail]);
+        sendPacketQueue();
       }
+      
 
-
-      //test if sending data is exceeding buffer size 
-      while(derp){
-      initializePacket(packetQueue[packetQueueTail]);
-      insertToPacket(packetQueue[packetQueueTail], 0x01);
-      insertToPacket(packetQueue[packetQueueTail], 0x02);
-      insertToPacket(packetQueue[packetQueueTail], 0x03);
-      insertToPacket(packetQueue[packetQueueTail], 0x04);
-      insertToPacket(packetQueue[packetQueueTail], 0x05);
-      insertToPacket(packetQueue[packetQueueTail], 0x06);
-      insertToPacket(packetQueue[packetQueueTail], 0x07);
-      insertToPacket(packetQueue[packetQueueTail], 0x08);
-      insertToPacket(packetQueue[packetQueueTail], 0x09);
-      insertToPacket(packetQueue[packetQueueTail], 0x0A);
-      insertToPacket(packetQueue[packetQueueTail], 0x0B);
-      insertToPacket(packetQueue[packetQueueTail], 0x0C);
-      insertToPacket(packetQueue[packetQueueTail], 0x0D);
-      insertToPacket(packetQueue[packetQueueTail], 0x0E);
-      insertToPacket(packetQueue[packetQueueTail], 0x0F);
-      insertToPacket(packetQueue[packetQueueTail], 0x11);
-      insertToPacket(packetQueue[packetQueueTail], 0x12);
-      insertToPacket(packetQueue[packetQueueTail], 0x13);
-      insertToPacket(packetQueue[packetQueueTail], 0x14);
-      insertToPacket(packetQueue[packetQueueTail], 0x15);
-      insertToPacket(packetQueue[packetQueueTail], 0x16);
-      insertToPacket(packetQueue[packetQueueTail], 0x17);
-      insertToPacket(packetQueue[packetQueueTail], 0x18);
-      insertToPacket(packetQueue[packetQueueTail], 0x19);
-      insertToPacket(packetQueue[packetQueueTail], 0x1A);
-      insertToPacket(packetQueue[packetQueueTail], 0x1B);
-      insertToPacket(packetQueue[packetQueueTail], 0x1C);
-      insertToPacket(packetQueue[packetQueueTail], 0x1D);
-      insertToPacket(packetQueue[packetQueueTail], 0x1E);
-      insertToPacket(packetQueue[packetQueueTail], 0x1F);
-      closePacket(packetQueue[packetQueueTail]);
-      sendPacketQueue();
-      derp = false;
-      }
+//      //test if sending data is exceeding buffer size 
+//      while(derp){
+//      initializePacket(packetQueue[packetQueueTail]);
+//      insertToPacket(packetQueue[packetQueueTail], 0x00);
+//      insertToPacket(packetQueue[packetQueueTail], 0x01);
+//      insertToPacket(packetQueue[packetQueueTail], 0x02);
+//      insertToPacket(packetQueue[packetQueueTail], 0x03);
+//      insertToPacket(packetQueue[packetQueueTail], 0x04);
+//      insertToPacket(packetQueue[packetQueueTail], 0x05);
+//      insertToPacket(packetQueue[packetQueueTail], 0x06);
+//      insertToPacket(packetQueue[packetQueueTail], 0x07);
+//      insertToPacket(packetQueue[packetQueueTail], 0x08);
+//      insertToPacket(packetQueue[packetQueueTail], 0x09);
+//      insertToPacket(packetQueue[packetQueueTail], 0x0A);
+//      insertToPacket(packetQueue[packetQueueTail], 0x0B);
+//      insertToPacket(packetQueue[packetQueueTail], 0x0C);
+//      insertToPacket(packetQueue[packetQueueTail], 0x0D);
+//      insertToPacket(packetQueue[packetQueueTail], 0x0E);
+//      insertToPacket(packetQueue[packetQueueTail], 0x0F);
+//      insertToPacket(packetQueue[packetQueueTail], 0x10);
+//      insertToPacket(packetQueue[packetQueueTail], 0x11);
+//      insertToPacket(packetQueue[packetQueueTail], 0x12);
+//      insertToPacket(packetQueue[packetQueueTail], 0x13);
+//      insertToPacket(packetQueue[packetQueueTail], 0x14);
+//      insertToPacket(packetQueue[packetQueueTail], 0x15);
+//      insertToPacket(packetQueue[packetQueueTail], 0x16);
+//      insertToPacket(packetQueue[packetQueueTail], 0x17);
+//      insertToPacket(packetQueue[packetQueueTail], 0x18);
+//      insertToPacket(packetQueue[packetQueueTail], 0x19);
+//      insertToPacket(packetQueue[packetQueueTail], 0x1A);
+//      insertToPacket(packetQueue[packetQueueTail], 0x1B);
+//      insertToPacket(packetQueue[packetQueueTail], 0x1C);
+//      insertToPacket(packetQueue[packetQueueTail], 0x1D);
+//      insertToPacket(packetQueue[packetQueueTail], 0x1E);
+//      insertToPacket(packetQueue[packetQueueTail], 0x1F);
+//      closePacket(packetQueue[packetQueueTail]);
+//      sendPacketQueue();
+//      derp = false;
+//      }
     }
   }
 }
