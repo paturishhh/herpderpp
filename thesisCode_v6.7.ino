@@ -7,13 +7,13 @@
 #include <avr/interrupt.h>
 #include <math.h>
 #include <Servo.h>
-//boolean derp = true;
+boolean derp = true;
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
-#define PACKET_QUEUE_SIZE 0x03 // Queue for packet
-#define SERIAL_QUEUE_SIZE 0x05 // Queue for serial
-#define BUFFER_SIZE 0x37 // bytes queue will hold 0x37
+#define PACKET_QUEUE_SIZE 0x02 // Queue for packet (index starts @ 0) can be changed :D
+#define SERIAL_QUEUE_SIZE 0x05 // Queue for serial (index starts @ 0) can be changed :D
+#define BUFFER_SIZE 0x13 // bytes queue will hold; preferably wag nalang galawin ^^
 #define MAX_CONFIG_PART 0x05 // receiving config
 #define MAX_ATTEMPT 0x03 // contacting sink
 
@@ -134,53 +134,71 @@ const char* const messages[] PROGMEM = {segmentBranch0, segmentBranch1, segmentB
                                        };
 char buffer[32]; //update according to longest message
 
-/************* Other Node Modules *************/
-void triggerOnDemand() {
-  //  //check which port/s is set
-  //  for (byte x = 0x00; x <= 0x0C; x++) {
-  //    int onDemand = onDemandRegister & (0x01 << x); //shift it then AND it
-  //    Serial.print("onDemandValue: ");
-  //    Serial.println(onDemand);
-  //    Serial.print("Checking port: ");
-  //    Serial.println(x);
-  //    if (onDemand == (0x01 << x)) { // if is set
-  //      Serial.print("Port set: ");
-  //      Serial.println(x);
-  //      byte temp = portConfigSegment[x]; // get port config segment of that port
-  //      temp = temp & 0x08; // check if 0x08 then actuator; if 0x00 sensor
-  //      Serial.println("TEMP: ");
-  //      Serial.print(temp);
-  //      if (temp == 0x08) { // ODM - actuator write
-  //        if (x >= 0x06) { //analog
-  //          //          temp = analogWrite(port[x]);
-  //
-  //        }
-  //        else { //digital
-  //
-  //        }
-  //
-  //      }
-  //      else if (temp == 0x00) { // ODM - sensor read
-  //
-  //      }
-  //
-  //
-  //    }
-  //  }
-  //for each port set
-  // check 3rd bit of port config segment [of that port]
-  //if sensor
-  // if port num is 0-5 then digital
-  // else if port num 6-B then analog
-  //read sensor data
-  // save in port value
-  //if actuator
-  // if port num is 0-5 then digital
-  // else if port num 6-B then analog
-  //switch actuator data
-  // store data in port value
-  //clear it on onDemandRegister
+void printQueue(byte temp[][BUFFER_SIZE], byte queueSize) { // you can remove the queue_Size and buffer size; prints serialBuffer
+  byte x = 0x00;
+  byte halt = false;
+  for (byte y = 0x00; y < queueSize; y++) {
+    while (!halt) {
+      if (temp[y][x] == 0xFE) {
+        Serial.print(temp[y][x], HEX);
+        halt = true;
+      }
+      else {
+        Serial.print(temp[y][x], HEX);
+      }
 
+      if (x != BUFFER_SIZE)
+        x = x + 0x01;
+      else {
+        halt = true;
+      }
+    }
+    halt = false;
+    x = 0x00;
+    Serial.println();
+  }
+}
+
+void printBuffer(byte temp[]) { // just prints
+  byte x = 0x00;
+  byte halt = false;
+  char convertedValue; //to print as hex
+//  byte convertedValue;
+  while (!halt) {
+    convertedValue = temp[x];
+    
+    //actual printing
+    if (temp[x] == 0xFE) {
+      Serial.print(convertedValue);
+      halt = true;
+    }
+    else {
+      Serial.print(convertedValue);
+    }
+
+    if (x != BUFFER_SIZE)
+      x = x + 0x01;
+    else {
+      halt = true;
+    }
+  }
+  Serial.println();
+}
+
+void sendPacketQueue() { //send entire packetqueue
+  while (!packetQisEmpty) {  
+    printBuffer(packetQueue[packetQueueHead]);
+    packetQueueHead = (packetQueueHead + 0x01) % PACKET_QUEUE_SIZE; // increment head
+    packetQisFull = false;
+    if (packetQueueHead == packetQueueTail && (packetQisFull == false)) {
+      packetQisEmpty = true;
+    }
+  }
+  if (packetQisEmpty == true && requestConfig == true && attemptCounter == 0x00 && errorFlag == 0x00) {
+    //attempt counter was added since you only need to restart it every time na restart and no error
+    initializeTimer();
+    Serial.println("initialize timer");
+  }
 }
 
 void initializePacket(byte pQueue[]) { // one row //adds necessary stuff at init; needs one part row
@@ -214,6 +232,8 @@ void insertToPacket(byte pQueue[], byte portNumber) { // for port data
   //adds count for each command
   //checks if equal to buffersize - 2 (coz may footer pa)
   pQueue[5] = 0x0F; //command
+  packetQisEmpty = false; // kasi may laman na siya by that time
+  
   if ((packetPos != (BUFFER_SIZE - 2)) && ((packetPos + 0x03) <= (BUFFER_SIZE - 2))) { //if not full and kapag nilagay mo dapat hindi mapupuno
 //    packetPos = packetPos + 0x01;//packetPos starts at command's pos
     pQueue[packetPos] = portNumber;
@@ -234,60 +254,26 @@ void insertToPacket(byte pQueue[], byte portNumber) { // for port data
 //      packetPos = packetPos + 0x01;
     }
     else { //queue is full
-      sendPacketQueue();
+      Serial.print("Tail:");
+      Serial.println(packetQueueTail, HEX);
+      Serial.print("Head:");
+      Serial.println(packetQueueHead, HEX);
+      Serial.println("Flush all");
+      packetQisFull = true;
+      sendPacketQueue(); //flush all
+      initializePacket(packetQueue[packetQueueTail]); //create new packet
+      insertToPacket(packetQueue[packetQueueTail], portNumber); // add new one
+//      Serial.println("Double check");
+//      printQueue(packetQueue, PACKET_QUEUE_SIZE);
     }
   }
 }
 
-void formatReplyPacket(byte pQueue[], byte command) { // format reply with command param only
+void formatReplyPacket(byte pQueue[], byte command) { // format reply with command param only and tell that packet queue has something
   pQueue[4] = command;
   packetPos = 0x05;
-}
-
-void printQueue(byte temp[][BUFFER_SIZE], byte queueSize) { // you can remove the queue_Size and buffer size; prints serialBuffer
-  byte x = 0x00;
-  byte halt = false;
-  for (byte y = 0x00; y < queueSize; y++) {
-    while (!halt) {
-      if (temp[y][x] == 0xFE) {
-        Serial.print(temp[y][x], HEX);
-        halt = true;
-      }
-      else {
-        Serial.print(temp[y][x], HEX);
-      }
-
-      if (x != BUFFER_SIZE)
-        x = x + 0x01;
-      else {
-        halt = true;
-      }
-    }
-    halt = false;
-    x = 0x00;
-    Serial.println();
-  }
-}
-
-void printBuffer(byte temp[]) {
-  byte x = 0x00;
-  byte halt = false;
-  while (!halt) {
-    if (temp[x] == 0xFE) {
-      Serial.print(temp[x], HEX);
-      halt = true;
-    }
-    else {
-      Serial.print(temp[x], HEX);
-    }
-
-    if (x != BUFFER_SIZE)
-      x = x + 0x01;
-    else {
-      halt = true;
-    }
-  }
-  Serial.println();
+//  printBuffer(packetQueue[packetQueueTail]);
+  packetQisEmpty = false;
 }
 
 void loadConfig() { //loads config file and applies it to the registers
@@ -303,7 +289,7 @@ void loadConfig() { //loads config file and applies it to the registers
     errorFlag |= temp;
   }
   else {
-    File configFile = SD.open("con.log");
+    File configFile = SD.open("conf.log");
     if (configFile) { // check if there is saved config
       while (configFile.available()) {
         int fileTemp = configFile.read();
@@ -553,21 +539,6 @@ void writeConfig() { // writes node configuration to SD card
   //    Serial.print(buffer);
   //  }
 
-}
-
-void sendPacketQueue() {
-  while (packetQueueHead != packetQueueTail) {
-    printBuffer(packetQueue[packetQueueHead]);
-    packetQueueHead = (packetQueueHead + 0x01) % PACKET_QUEUE_SIZE; // increment head
-  }
-  if (packetQueueHead == packetQueueTail) {
-    packetQisEmpty = true;
-  }
-  if (packetQisEmpty == true && requestConfig == true && attemptCounter == 0x00 && errorFlag == 0x00) {
-    //attempt counter was added since you only need to restart it every time na restart and no error
-    initializeTimer();
-    Serial.println("initialize timer");
-  }
 }
 
 void manipulatePortData(byte index, byte configType) { //checks port type, actuates and senses accordingly 
@@ -1616,14 +1587,14 @@ void setup() {
   memset(serialQueue, 0x00, sizeof(serialQueue));
   memset(convertedEventSegment, 0x00, sizeof(convertedEventSegment));
 
-  //    if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
-  //      writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
-  //    }
-  //    else{
-  //      byte temp = 0x01;
-  //      errorFlag |= temp; // cannot access sd card
-  //      Serial.println(errorFlag, HEX);
-  //    }
+//      if(SD.begin(CS_PIN)){ // uncomment entire block to reset node (to all 0)
+//        writeConfig(); //meron itong sd.begin kasi nagrurun ito ideally after config... therefore na sd.begin na ni loadConfig na ito sooo if gusto mo siya irun agad, place sd.begin
+//      }
+//      else{
+//        byte temp = 0x01;
+//        errorFlag |= temp; // cannot access sd card
+//        Serial.println(errorFlag, HEX);
+//      }
 
   loadConfig(); //basically during the node's lifetime, lagi ito una, so if mag fail ito, may problem sa sd card (either wala or sira) therefore contact sink
 //  printRegisters();
@@ -1879,45 +1850,26 @@ void loop() {
       }
       
 
-//      //test if sending data is exceeding buffer size 
-//      while(derp){
-//      initializePacket(packetQueue[packetQueueTail]);
-//      insertToPacket(packetQueue[packetQueueTail], 0x00);
-//      insertToPacket(packetQueue[packetQueueTail], 0x01);
-//      insertToPacket(packetQueue[packetQueueTail], 0x02);
-//      insertToPacket(packetQueue[packetQueueTail], 0x03);
-//      insertToPacket(packetQueue[packetQueueTail], 0x04);
-//      insertToPacket(packetQueue[packetQueueTail], 0x05);
-//      insertToPacket(packetQueue[packetQueueTail], 0x06);
-//      insertToPacket(packetQueue[packetQueueTail], 0x07);
-//      insertToPacket(packetQueue[packetQueueTail], 0x08);
-//      insertToPacket(packetQueue[packetQueueTail], 0x09);
-//      insertToPacket(packetQueue[packetQueueTail], 0x0A);
-//      insertToPacket(packetQueue[packetQueueTail], 0x0B);
-//      insertToPacket(packetQueue[packetQueueTail], 0x0C);
-//      insertToPacket(packetQueue[packetQueueTail], 0x0D);
-//      insertToPacket(packetQueue[packetQueueTail], 0x0E);
-//      insertToPacket(packetQueue[packetQueueTail], 0x0F);
-//      insertToPacket(packetQueue[packetQueueTail], 0x10);
-//      insertToPacket(packetQueue[packetQueueTail], 0x11);
-//      insertToPacket(packetQueue[packetQueueTail], 0x12);
-//      insertToPacket(packetQueue[packetQueueTail], 0x13);
-//      insertToPacket(packetQueue[packetQueueTail], 0x14);
-//      insertToPacket(packetQueue[packetQueueTail], 0x15);
-//      insertToPacket(packetQueue[packetQueueTail], 0x16);
-//      insertToPacket(packetQueue[packetQueueTail], 0x17);
-//      insertToPacket(packetQueue[packetQueueTail], 0x18);
-//      insertToPacket(packetQueue[packetQueueTail], 0x19);
-//      insertToPacket(packetQueue[packetQueueTail], 0x1A);
-//      insertToPacket(packetQueue[packetQueueTail], 0x1B);
-//      insertToPacket(packetQueue[packetQueueTail], 0x1C);
-//      insertToPacket(packetQueue[packetQueueTail], 0x1D);
-//      insertToPacket(packetQueue[packetQueueTail], 0x1E);
-//      insertToPacket(packetQueue[packetQueueTail], 0x1F);
-//      closePacket(packetQueue[packetQueueTail]);
-//      sendPacketQueue();
-//      derp = false;
-//      }
+      //test if sending data is exceeding buffer size 
+      while(derp){
+      initializePacket(packetQueue[packetQueueTail]);
+      insertToPacket(packetQueue[packetQueueTail], 0x00);
+      insertToPacket(packetQueue[packetQueueTail], 0x01);
+      insertToPacket(packetQueue[packetQueueTail], 0x02);
+      insertToPacket(packetQueue[packetQueueTail], 0x03);
+      insertToPacket(packetQueue[packetQueueTail], 0x04);
+      insertToPacket(packetQueue[packetQueueTail], 0x05);
+      insertToPacket(packetQueue[packetQueueTail], 0x06);
+      insertToPacket(packetQueue[packetQueueTail], 0x07);
+      insertToPacket(packetQueue[packetQueueTail], 0x08);
+      insertToPacket(packetQueue[packetQueueTail], 0x09);
+      insertToPacket(packetQueue[packetQueueTail], 0x0A);
+      insertToPacket(packetQueue[packetQueueTail], 0x0B);
+      
+      closePacket(packetQueue[packetQueueTail]);
+      sendPacketQueue();
+      derp = false;
+      }
     }
   }
 }
