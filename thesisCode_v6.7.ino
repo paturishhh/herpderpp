@@ -7,7 +7,6 @@
 #include <avr/interrupt.h>
 #include <math.h>
 #include <Servo.h>
-boolean derp = true;
 #define MAX_COMMAND_CODE 0x05 //note: starts from 0; 
 #define MAX_COMMAND 0x03 // 12 ports * 3 modes if sensor/actuator ; placed as 2 temporarily
 #define PORT_COUNT 0x0C // 12 ports
@@ -579,9 +578,12 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
       portValue[index] = digitalRead(index + 0x04);
     }
     else if (index >= 0x06) { // analog sensor
-
+      portValue[index] = analogRead((index % 6));
+//      Serial.print("index");
+//      Serial.println(index);
+//      Serial.print("Read");
+//      Serial.println(portValue[index], HEX);
     }
-    timerRequest = timerRequest | (1 << index); //to be able to send again
   }
   portDataChanged |= (1 << index); //set port data changed
   Serial.print("data change: ");
@@ -650,7 +652,7 @@ boolean checkEventCondition(byte eventCondition, int tempPortValue, int eventVal
     return conditionReached;
   }
 
-boolean checkPortConfig() {
+boolean checkPortConfig() { //checks saved config per pin (after being retrieved from serial queue)
   unsigned int actuatorValue;
   byte configCheck = 0x00; // stores which bit is being checked
   byte configType;
@@ -833,7 +835,7 @@ void checkOtherCommands() { // checks if there is still commands
   }
 }
 
-void retrieveSerialQueue(byte queue[], byte head) {
+void retrieveSerialQueue(byte queue[], byte head) { // read from queue and store to variables
   byte x = 0x00;
   byte halt = false;
   segmentCounter = 0x00;
@@ -1570,7 +1572,7 @@ void setup() {
 
   // NOTE: AVOID PUTTING STUFF ON PIN 0 & 1 coz that is where serial is (programming, debugging)
   for (byte c = 0x00; c < 0x0C; c++) {
-    setPortConfigSegmentInit(c, 1); // set the port to OUTPUT
+    setPortConfigSegmentInit(c, 0x08); // set the port to OUTPUT
     //    Serial.print("Port Config Segment at Start: ");
     //    Serial.println(getPortConfigSegment(c), HEX);
   }
@@ -1752,14 +1754,14 @@ void loop() {
           timerGrantMask = (1 << x); 
 
           if((timerGrantMask & timerGrant) == timerGrantMask){ // if set
-            manipulatePortData(x,0x00); //timer
+            manipulatePortData(x,0x00); //timer write / read
             timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
+            timerRequest = timerRequest | (1 << index); //request again
 //            Serial.println(timerGrant, HEX);
           }
         }
 //        Serial.print("End loop timerGrant: ");
 //        Serial.println(timerGrant, HEX);// kahit hindi zero kasi interrupt ito
-
       }
       if (eventRequest != 0x00) { // check event request
 
@@ -1847,28 +1849,6 @@ void loop() {
         }
         closePacket(packetQueue[packetQueueTail]);
         sendPacketQueue();
-      }
-      
-
-      //test if sending data is exceeding buffer size 
-      while(derp){
-      initializePacket(packetQueue[packetQueueTail]);
-      insertToPacket(packetQueue[packetQueueTail], 0x00);
-      insertToPacket(packetQueue[packetQueueTail], 0x01);
-      insertToPacket(packetQueue[packetQueueTail], 0x02);
-      insertToPacket(packetQueue[packetQueueTail], 0x03);
-      insertToPacket(packetQueue[packetQueueTail], 0x04);
-      insertToPacket(packetQueue[packetQueueTail], 0x05);
-      insertToPacket(packetQueue[packetQueueTail], 0x06);
-      insertToPacket(packetQueue[packetQueueTail], 0x07);
-      insertToPacket(packetQueue[packetQueueTail], 0x08);
-      insertToPacket(packetQueue[packetQueueTail], 0x09);
-      insertToPacket(packetQueue[packetQueueTail], 0x0A);
-      insertToPacket(packetQueue[packetQueueTail], 0x0B);
-      
-      closePacket(packetQueue[packetQueueTail]);
-      sendPacketQueue();
-      derp = false;
       }
     }
   }
