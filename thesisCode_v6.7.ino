@@ -317,6 +317,13 @@ void loadConfig() { //loads config file and applies it to the registers
         }
         else if (fileCounter == 0x05) {
           portConfigSegment[index] = fileTemp;
+//          Serial.print("config");
+//          Serial.println(fileTemp,HEX);
+//          Serial.println((fileTemp & 0x07), HEX);
+          if ((fileTemp & 0x07) != 0x00){ //means config was changed
+//            Serial.println("Setting configChange");
+            configChangeRegister |= (1 << index); //to set for later
+          }
           if (index != (PORT_COUNT - 1)) {
             fileCounter = 0x04;
           }
@@ -434,6 +441,7 @@ void loadConfig() { //loads config file and applies it to the registers
         }
       }
       //      printRegisters();
+      checkPortConfig(); // to apply it to flags
       // to inform sink node of successful loadup
       initializePacket(packetQueue[packetQueueHead]);
       formatReplyPacket(packetQueue[packetQueueHead], 0x0B);
@@ -673,7 +681,7 @@ boolean checkPortConfig() { //checks saved config per pin (after being retrieved
       while (configCheck != 0x03) { //checks if config is sent per pin
         byte checker = (configType & (1 << configCheck));
         if (checker == 0x01) { // time based
-          Serial.println("@ time!");
+//          Serial.println("@ time!");
           //Serial.print("timerSeg: ");
           //Serial.println(timerSegment[portNum], HEX);
           calculateOverflow(timerSegment[x], x);
