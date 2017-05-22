@@ -581,13 +581,13 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
       portValue[index] = analogRead((index % 6));
 //      Serial.print("index");
 //      Serial.println(index);
-//      Serial.print("Read");
-//      Serial.println(portValue[index], HEX);
+      Serial.print("Read");
+      Serial.println(portValue[index], HEX);
     }
   }
   portDataChanged |= (1 << index); //set port data changed
-  Serial.print("data change: ");
-  Serial.println(portDataChanged,HEX);
+//  Serial.print("data change: ");
+//  Serial.println(portDataChanged,HEX);
 }
 
 void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
@@ -1756,8 +1756,9 @@ void loop() {
           if((timerGrantMask & timerGrant) == timerGrantMask){ // if set
             manipulatePortData(x,0x00); //timer write / read
             timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
-            timerRequest = timerRequest | (1 << index); //request again
-//            Serial.println(timerGrant, HEX);
+            timerRequest = timerRequest | (1 << x); //request again
+            Serial.println(timerGrant, HEX);
+            Serial.println(timerRequest, HEX);
           }
         }
 //        Serial.print("End loop timerGrant: ");
@@ -1843,8 +1844,8 @@ void loop() {
           if ((portDataChanged & portDataChangedMask) == portDataChangedMask) { //portData was changed
             insertToPacket(packetQueue[packetQueueTail], x);
             portDataChanged = portDataChanged & ~portDataChangedMask; //turn off port data changed of bit
-            Serial.print("data change after send: ");
-            Serial.println(portDataChanged,HEX);
+//            Serial.print("data change after send: ");
+//            Serial.println(portDataChanged,HEX);
           }
         }
         closePacket(packetQueue[packetQueueTail]);
