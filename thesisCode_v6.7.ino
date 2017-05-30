@@ -17,6 +17,7 @@
 #define MAX_ATTEMPT 0x03 // contacting sink
 #define SUCCESS_LED_PIN 0x02 // startup pin to indicate success
 #define ERROR_LED_PIN 0x03 //startup pin to indicate error
+unsigned int timeoutVal = 0x2005; //5 seconds
 
 int CS_PIN = 27; // for SPI; 27 is used for Gizduino IOT-644
 byte errorFlag = 0x00; // bits correspond to an error
@@ -32,7 +33,6 @@ byte configPartNumber = 0x00; // stores the config part last served
 byte configSentPartCtr = 0x00; //config part being read
 boolean timerReset = false; //set when there is time config
 
-unsigned int timeoutVal = 0x2005; //5 seconds
 boolean requestConfig = false; // checks if node is requesting config
 
 byte apiCount = 0x01; //API version
@@ -134,6 +134,8 @@ const char* const messages[] PROGMEM = {segmentBranch0, segmentBranch1, segmentB
                                         infoMessage8, infoMessage9, infoMessage10, infoMessage11, errorMessage1, errorMessage2, infoMessage12, infoMessage13, infoMessage14, infoMessage15, infoMessage16, infoMessage17, infoMessage18, infoMessage19, infoMessage20
                                        };
 char buffer[32]; //update according to longest message
+
+Servo servo0, servo1, servo2, servo3, servo4, servo5;
 
 void printQueue(byte temp[][BUFFER_SIZE], byte queueSize) { // you can remove the queue_Size and buffer size; prints serialBuffer
   byte x = 0x00;
@@ -478,10 +480,10 @@ void writeConfig() { // writes node configuration to SD card
   //  if(SD.begin(CS_PIN)){
   if (SD.exists("conf.log")) { //otherwise will overwrite
     SD.remove("conf.log");
-    Serial.println("Creating new");
+//    Serial.println("Creating new");
   }
   File configFile = SD.open("conf.log", FILE_WRITE);
-  Serial.println("writing");
+//  Serial.println("writing");
   if (configFile) {
     configFile.write(logicalAddress);
     configFile.write(physicalAddress);
@@ -532,7 +534,7 @@ void writeConfig() { // writes node configuration to SD card
       //      Serial.println(lowByte(actuatorValueTimerSegment[c]),HEX);
     }
     configFile.close();
-    Serial.println("Writing finish");
+//    Serial.println("Writing finish");
     //      printRegisters();
   }
   else {
@@ -564,8 +566,8 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     else if (configType == 0x02) { //odm
       actuatorValue = actuatorValueOnDemandSegment[index];
     }
-
-    //Serial.println(actuatorValue, HEX);
+    actuatorValue = actuatorValue & 0x0FFF; // get only details
+//    Serial.println(actuatorValue, HEX);
 
     if (index < 0x06) { // digital actuator
       if (actuatorValue == 0) {
@@ -578,28 +580,40 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
 //      Serial.print("Port VALUE");
 //      Serial.println(portValue[index],HEX);
     }
-    else if (index >= 0x06) { //analog actuator inserted on A0-A6 (GPIO)
-      // A0 - 14 - 6 = 8
-      // A1 - 15 - 7 = 8
-      // A2 - 16 - 8 = 8
-      // A3 - 17 - 9 = 8
-      // A4 - 18 - A = 8
-      // A5 - 19 - B = 8
-      // skeletal tracking
-      // 
-      
+    else if (index >= 0x06) { //analog actuator inserted on A0-A5
+      Serial.println("Analog");
       Serial.print("Actuator Value: ");
-      Serial.println(actuatorValue); //int
+      actuatorValue = bcdToDecimal(actuatorValue);
+//      Serial.println(actuatorValue); //read as hex
+      //convert to int
+      
+      if(index == 0x06){ // A0 - 14 >>> 6 
+        servo0.write(actuatorValue); //takes int
+        portValue[index] = servo0.read();
+      }
+      else if(index == 0x07){ // A1 - 15 >>> 7
+        servo1.write(actuatorValue);
+        portValue[index] = servo1.read();
+      }
+      else if(index == 0x08){ // A2 - 16 >>>  8
+        servo2.write(actuatorValue);
+        portValue[index] = servo2.read();
+      }
+      else if(index == 0x09){ // A3 - 17 >>>  9 
+        servo3.write(actuatorValue);
+        portValue[index] = servo3.read();
+      }
+      else if(index == 0x0A){ // A4 - 18 >>> A
+        servo4.write(actuatorValue);
+        portValue[index] = servo4.read();
+      }
+      else if(index == 0x0B){ // A5 - 19 >>>  B
+        servo5.write(actuatorValue);
+        portValue[index] = servo5.read();
+      }
 
-//      analogWrite((index % 6), actuatorValue);
-//      portValue[index] = analogRead((index % 6));
-//      Serial.print("Port VALUE: ");
-//      Serial.println(portValue[index]);
-  
-      digitalWrite((index + 0x08), portValue[index]);
-      Serial.print("Index for write: ");
-      Serial.println(index + 0x08, HEX);
-      portValue[index] = digitalRead(index);
+      Serial.print("Index: ");
+      Serial.println(index, HEX);
       Serial.print("Port VALUE");
       Serial.println(portValue[index],HEX);
     }
@@ -610,9 +624,7 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
       portValue[index] = digitalRead(index + 0x04);
     }
     else if (index >= 0x06) { // analog sensor
-      portValue[index] = analogRead((index % 6));
-//      Serial.print("index");
-//      Serial.println(index);
+      portValue[index] = analogRead((index + 0x08));
       Serial.print("Read");
       Serial.println(portValue[index], HEX);
     }
@@ -636,14 +648,14 @@ void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
     temp = eventSegment[portNum + 0x0C]; //next part
     temp = (temp & 0x0FFF);
     convertedEventSegment[portNum + 0x0C] = bcdToDecimal(temp);
-    //Serial.println("@ Ra");
+    Serial.println("@ Ra");
     Serial.println(convertedEventSegment[portNum]);
     Serial.println(convertedEventSegment[portNum + 0x0C]);
   }
   else { //threshold
     temp = (temp & 0xF000);
     convertedEventSegment[portNum] = bcdToDecimal(temp); //converts it to decimal
-    //Serial.print("@ Th: ");
+    Serial.print("@ Th: ");
     Serial.println(convertedEventSegment[portNum]);
   }
 
@@ -658,30 +670,30 @@ boolean checkEventCondition(byte eventCondition, int tempPortValue, int eventVal
         conditionReached = true;
       }
       Serial.println("<");
-    }
-    else if (eventCondition == 0x01) { // less than equal
+  }
+  else if (eventCondition == 0x01) { // less than equal
       //portData <= eventValue
       if (tempPortValue <= eventValue) {
         conditionReached = true;
       }
       Serial.println("<=");
-    }
-    else if (eventCondition == 0x02) { // greater than not equal
+  }
+  else if (eventCondition == 0x02) { // greater than not equal
       // portData > eventValue
       if (tempPortValue > eventValue) {
         conditionReached = true;
       }
       Serial.println(">");
-    }
-    else if (eventCondition == 0x03) { // greater than equal
+  }
+  else if (eventCondition == 0x03) { // greater than equal
       // portData >= eventValue
       if (tempPortValue >= eventValue) {
         conditionReached = true;
       }
       Serial.println(">=");
-    }
+  }
   
-    return conditionReached;
+  return conditionReached;
   }
 
 boolean checkPortConfig() { //checks saved config per pin (after being retrieved from serial queue)
@@ -1467,7 +1479,7 @@ void calculateOverflow(unsigned int tempTime, byte portOverflowIndex) {
 
 }
 
-unsigned int bcdToDecimal(unsigned int nTime) { //returns unsigned int to save space
+unsigned int bcdToDecimal(unsigned int nTime) { 
   unsigned int temp = 0;
   //999
   temp = ((nTime >> 8) % 16);
@@ -1475,6 +1487,8 @@ unsigned int bcdToDecimal(unsigned int nTime) { //returns unsigned int to save s
   temp += ((nTime >> 4) % 16);
   temp *= 10;
   temp += (nTime % 16);
+//  Serial.print("Converted");
+//  Serial.println(temp);
   return temp;
 }
 
@@ -1579,6 +1593,14 @@ void initializeTimer() {
 }
 
 void setup() {
+  //attaching the pin to
+  servo0.attach(14);
+  servo1.attach(15);
+  servo2.attach(16);
+  servo3.attach(17);
+  servo4.attach(18);
+  servo5.attach(19);
+  
   //initiallize startup pins
   pinMode(2, OUTPUT);
   pinMode(3, OUTPUT);
@@ -1764,7 +1786,7 @@ void loop() {
             timerReset = false;
           }
           else{
-            Serial.println("!timerReset");
+//            Serial.println("!timerReset");
           }
         } else {
           Serial.println("!config");
