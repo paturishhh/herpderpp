@@ -51,7 +51,7 @@ unsigned int actuatorValueOnDemandSegment[(int) PORT_COUNT]; // stores data to w
 unsigned int portValue[(int) PORT_COUNT]; //stores port values but in BCD
 unsigned int timerSegment[(int) PORT_COUNT]; //timer segment
 unsigned int eventSegment[(int) PORT_COUNT * 2]; //event segment - 24 slots (0-23(17h)) 0-B (if threshold mode) C-17 (if range mode)
-unsigned int convertedEventSegment[(int) PORT_COUNT * 2]; // decimal values of event segment
+int convertedEventSegment[(int) PORT_COUNT * 2]; // decimal values of event segment
 unsigned int actuatorDetailSegment[(int) PORT_COUNT]; //actuator details segment (event)
 unsigned int actuatorValueTimerSegment[(int) PORT_COUNT]; // stores data to write on actuator if timer
 unsigned int portDataChanged; // stores if the data is changed
@@ -558,7 +558,7 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
   unsigned int actuatorValue = 0x0000;
 
   if ((portConfigSegment[index] & 0x08) == 0x08) { //actuator
-    Serial.println("Actuator!");
+//    Serial.println("Actuator!");
     if (configType == 0x00) { // time
       actuatorValue = actuatorValueTimerSegment[index];
     }
@@ -569,10 +569,10 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
       actuatorValue = actuatorValueOnDemandSegment[index];
     }
     actuatorValue = actuatorValue & 0x0FFF; // get only details
-    Serial.print("actuatorValue: ");
-    Serial.println(actuatorValue, HEX);
-    Serial.print("index: ");
-    Serial.println(index,HEX);
+//    Serial.print("actuatorValue: ");
+//    Serial.println(actuatorValue, HEX);
+//    Serial.print("index: ");
+//    Serial.println(index,HEX);
 
     if (index < 0x06) { // digital actuator
       if (actuatorValue == 0x00) {
@@ -624,14 +624,16 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     }
   }
   else { //sensor
-    Serial.println("Sensor!");
+    Serial.println("Sensor @ manip!");
     if (index < 0x06) { //Digital sensor
       portValue[index] = digitalRead(index + 0x04);
     }
     else if (index >= 0x06) { // analog sensor
-      portValue[index] = analogRead((index + 0x08));
-      Serial.print("Read");
-      Serial.println(portValue[index], HEX);
+      int portVal = analogRead((index + 0x08)); //reads the value
+      portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+//      Serial.print("Read");
+//      Serial.println(portValue[index]);
+      
     }
   }
   portDataChanged |= (1 << index); //set port data changed
@@ -643,7 +645,7 @@ void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
   unsigned int temp = eventSegment[portNum];
 //  Serial.print("Port #: ");
 //  Serial.println(portNum, HEX);
-  Serial.print("Event: ");
+//  Serial.print("Event: ");
 //  Serial.println(temp, HEX);
 //  printRegisters();
   if ((temp & 0x8000) == 0x8000) { //range mode
@@ -658,20 +660,25 @@ void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
     Serial.println(convertedEventSegment[portNum + 0x0C]);
   }
   else { //threshold
-    Serial.println("@ Th ");
+//    Serial.println("@ Th ");
     temp = (temp & 0x0FFF);
     
     convertedEventSegment[portNum] = bcdToDecimal(temp); //converts it to decimal
     
-//    Serial.print("Orig:");
+//    Serial.print("cONVERTED:");
 //    Serial.println(temp, HEX);
 //    Serial.println(convertedEventSegment[portNum]);
   }
 
 }
 
-boolean checkEventCondition(byte eventCondition, int tempPortValue, int eventValue) {
+boolean checkEventCondition(byte eventCondition, int tempPortValue,int eventValue) {
   byte conditionReached = false;
+//  Serial.println("@ checkevent");
+//  Serial.print("Portvalue: ");
+//  Serial.println(tempPortValue);
+//  Serial.print("eventvalue: ");
+//  Serial.println(eventValue);
 
   if (eventCondition == 0x00) { //less than not equal
     // portData < eventValue
@@ -701,9 +708,16 @@ boolean checkEventCondition(byte eventCondition, int tempPortValue, int eventVal
       }
 //      Serial.println(">=");
   }
-  
+//  Serial.print("Read port val: ");
+//  Serial.println(tempPortValue);
+//  Serial.print("Event Condition: ");
+//  Serial.println(eventCondition, HEX);
+//  Serial.print("Event Value: ");
+//  Serial.println(eventValue);
+//  Serial.print("Condition Reached: ");
+//  Serial.println(conditionReached);
   return conditionReached;
-  }
+}
 
 boolean checkPortConfig() { //checks saved config per pin (after being retrieved from serial queue)
   unsigned int actuatorValue;
@@ -738,7 +752,7 @@ boolean checkPortConfig() { //checks saved config per pin (after being retrieved
           configChangeRegister = configChangeRegister & ~bitMask; //turns off config changed flag
         }
         else if (checker == 0x02) { // event
-          Serial.println("@ event check port config");
+//          Serial.println("@ event check port config");
 //          convertEventDetailsToDecimal(x);
           eventRequest |= (1 << x); //set event request
           applyConfig = true;
@@ -1884,48 +1898,40 @@ void loop() {
           byte eventCondition;
           boolean conditionReached = false;
           int tempPortValue;
-
-//          Serial.println("Event Request");
+          byte eventType;
 
           for (byte x = 0x00; x < PORT_COUNT; x++) {
-//            Serial.print("Index: ");
-//            Serial.println(x, HEX);
             eventRequestMask = (1 << x);
-//            Serial.print("event request: ");
-//            Serial.println(eventRequest, HEX);
+//            Serial.println("-----");
+//            Serial.print("PORT: ");
+//            Serial.println(x, HEX); 
 
           //check if port is event based
           if ((eventRequestMask & eventRequest) == eventRequestMask) {
+
+            //check condition
+            convertEventDetailsToDecimal(x); // MOVE UPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP
+            eventValue = convertedEventSegment[x];
+            eventCondition = ((eventSegment[x] & 0x3000) >> 12); //retain the condition
+            eventType = ((eventSegment[x] & 0xF000) >> 12); //getting event values
             
             //read port value
             if (x < 0x06) { //digital sensor
-              tempPortValue = digitalRead((x + 0x04));
+              tempPortValue = digitalRead((x + 0x04)); //check digital pin
             }
             else if (x >= 0x06) { //analog sensor
-              tempPortValue = analogRead((x + 0x08)); //write at analog pin
-//                Serial.print("Read port val: ");
-//                Serial.println(tempPortValue);
-            }
-//              Serial.print("Read port val: ");
+                tempPortValue = analogRead((x + 0x08)); //check analog pin
+                tempPortValue = constrain(tempPortValue, 0, 999); //scale it to 999 (max in bcd)
+//              Serial.print("tempPortVal");
 //              Serial.println(tempPortValue);
-
-            //check condition
-            convertEventDetailsToDecimal(x);
-            eventValue = convertedEventSegment[x];
-            eventCondition = ((eventSegment[x] & 0x3000) >> 12); //retain the condition
-            Serial.print("Event Condition: ");
-            Serial.println(eventCondition, HEX);
-            Serial.print("Temp portValue: ");
-            Serial.println(tempPortValue, HEX);
-            Serial.print("Event Value: ");
-            Serial.println(eventValue, HEX);
-
+            }
+            
             conditionReached = checkEventCondition(eventCondition, tempPortValue, eventValue);
+ 
   
-            eventValue = eventSegment[x]; //getting event values
-  
-            if ((eventValue & 0x80) == 0x80) { //check if range mode
+            if ((eventType & 0x80) == 0x80) { //check if range mode
               Serial.println("Range!");
+              
               eventCondition = ((eventSegment[x + 0x0C] & 0x3000) >> 12); //retain the condition
               eventValue = convertedEventSegment[x + 0x0C]; //get second value
   
@@ -1935,7 +1941,7 @@ void loop() {
             }
   
             if (conditionReached) {
-              Serial.println("condition was true");
+//              Serial.println("condition was true");
               portValue[x] = tempPortValue; //save port value
               portDataChanged |= eventRequestMask; // to tell that the port data has changed
 
@@ -1943,26 +1949,18 @@ void loop() {
               byte actuatorPort = ((actuatorDetailSegment[x] & 0xF000) >> 12);
               portConfigSegment[actuatorPort] |= 0x08; //set the actuator port to actuator
               actuatorDetailSegment[actuatorPort] = actuatorDetailSegment[x] & 0x0FFF; //store the event details of the actuator port to its corresponding actuator details
-//                Serial.print("Index: ");
-//                Serial.println(x, HEX);
-//                Serial.print("Actuator Port: ");
-//                Serial.println(actuatorPort, HEX);
-//                Serial.print("Act Config Segment: ");
-//                Serial.println(portConfigSegment[actuatorPort] , HEX);
-//                Serial.print("Act detail Segment: ");
-//                Serial.println(actuatorDetailSegment[actuatorPort] , HEX);
                 
               manipulatePortData(actuatorPort, 0x01); // write data to actuator port and store its port value
               portDataChanged |= (1 << actuatorPort); // tells port data of actuator port has changed
               eventRequest &= ~(1 << x); //turn off event request of sensor bit
-              Serial.print("Event Request: ");
-              Serial.println(eventRequest, HEX);
+//              Serial.print("Event Request: ");
+//              Serial.println(eventRequest, HEX);
               conditionReached = false; // reset
             }
           }
           }
-          Serial.print("End loop eventRequest: ");
-          Serial.println(eventRequest, HEX);// dapat zero
+//          Serial.print("End loop eventRequest: ");
+//          Serial.println(eventRequest, HEX);// dapat zero
       }
         if (portDataChanged != 0x00) { //to form packet
           unsigned int portDataChangedMask;
