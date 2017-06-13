@@ -1,82 +1,178 @@
-import collections, binascii, time
-import serial
+import collections, binascii, time, MySQLdb
+import serial, codecs
+from array import array
 
-QUEUE_SIZE = 2;
+QUEUE_SIZE = 3;
 packetQueue = collections.deque()
 
 def parsePacket():
-	"gets the packet from queue & parse according to protocol"
-	print("parse parse")
-	packet = packetQueue.popleft()
-	isValid = False
-	index = 0
-	if packet[index] == 255:
-		print("header found")
-		index += 1#I can't for loop coz I need the position
-		sourceAddr = packet[index]
-		index += 1
-		destAddr = packet[index]
-		index += 1
-		api = packet[index]
-		index += 1
-		if api == 2:
-			configVersion = packet[index]
-		elif api == 3:
-			commandType = packet[index]
-		index += 1
-		if api == 3 and commandType !=2 or commandType !=15:
-			#expect footer next
-			if packet[index] == 254:
-				print("footer found")
-				isValid = True
-	
+    "gets the packet from queue & parse commands received from node"
+    print("parse parse")
+    packetDetails = array('I') #stores packet details
+    packet = packetQueue.popleft()
+    isValid = False
+    
+    print(packet)
+    packet = bytearray(packet) #bytearray(b'\x01\x00\x03\x0b\xfe')
 
-
+    index = 0
+    for b in packet: #255, 1, 0, 3, 15, 0, 0, 0, 1, 254
+        if index == 9:#port data 2
+            if b == 254:
+                print("footer found")
+                isValid = True    
+        elif index == 8: #port data 1
+            packetDetails.append(b)
+            if (cur_count == count) == True:
+                index = 9
+            else:
+                cur_count += 1
+                index = 6
+        elif index == 7: #port number 2
+            packetDetails.append(b)
+            index = 8
+        elif index == 6: #port number 1
+            packetDetails.append(b)
+            index = 7
+        elif index == 5: #count
+            packetDetails.append(b)
+            count = b
+            cur_count = 0
+            index = 6
+        elif index == 4: #command
+            packetDetails.append(b)
+            if b == 15:
+                index = 5
+            else:
+                index = 9
+        elif index == 3: #api
+            index = 4
+        elif index == 2: #dest 
+            index = 3
+        elif index == 1: #source address
+            packetDetails.append(b)
+            index = 2
+        elif index == 0:
+            if b == 255:
+                print("header found")
+                index = 1
+    if isValid == True:
+        #insertToDatabase
+        print("insert db")
+        if packetDetails[1] == 15: 
+            insertPortData(packetDetails)
+        else:
+            insertCommand(packetDetails)
+    else:
+        print("invalid packet")
+    
 def readSerial():
-	arduino = serial.Serial()
-	arduino.port = 'COM7'
-	arduino.baudrate = 9600
-	arduino.timeout = None
-	arduino.open()
+    arduino = serial.Serial()
+    arduino.port = 'COM4'
+    arduino.baudrate = 9600
+    arduino.timeout = None
+    arduino.open()
 
-	if arduino.is_open:
-		time.sleep(2)
-		while arduino.in_waiting > 0: #while there is data
-			data = arduino.readline()[:-2] #removes /r and /n
-			
-			if len(packetQueue) != QUEUE_SIZE:
-				packetQueue.append(data) #insert data to queue
-				print(data)
-				print(len(packetQueue))
-			else:
-				parsePacket() #start one when full
-				packetQueue.append(data)
-				print('back')
-				print(list(packetQueue))
-		# parsePacket() #parse is none
-	else:
-		print('derp')
+    if arduino.is_open:
+        time.sleep(2) #wait
+        while arduino.in_waiting > 0: #while there is data
+            data = arduino.readline()[:-2] #removes /r and /n
+            
+            if len(packetQueue) != QUEUE_SIZE:
+                packetQueue.append(data) #insert data to queue
+                parsePacket() #parse one when full
+                # print(data)
+                # print(len(packetQueue))
+            else:
+                parsePacket() #parse one when full
+                packetQueue.append(data)
+                print('back')
+                print(list(packetQueue))
+        while len(packetQueue) != 0: #just empty the queue if there is no message
+            parsePacket() 
+        arduino.close() #close serial
+    else:
+        print('derp')
 
-				
+def insertPortData(packetDetails): #remember to close db after access    
+    database = MySQLdb.connect(host="localhost", user ="root", passwd = "root", db ="thesis")
+    # Create a Cursor object to execute queries.
+    cur = database.cursor()
+    
+    # Select data from table using SQL query.
+    sql = "SELECT * FROM node WHERE node_id = '%d'" % packetDetails[0]
+    print(sql)
+    cur.execute(sql)
+     
+    # print the first and second columns      
+    for row in cur.fetchall():
+      print (row[0], " ", row[1])
+    
+    database.close()
+    #cur.fetchone() one row
+    
+def insertCommand(packetDetails):
+    "save commands on database"
+    print(type(packetDetails))
+    nodeAddr = packetDetails[0]
+    database = MySQLdb.connect(host="localhost", user ="root", passwd = "root", db ="thesis")
+    cur = database.cursor()
+    sql = "SELECT * FROM node WHERE node_id = '%d'" % nodeAddr
+    print(cur.rowcount)
+    if cur.rowcount == -1 : #new node
+        addNode()
+        database.close()
+    else:
+        print("proceed with life")
+        database.close()
+
+def addNode():
+    "add a new node in case wala pa sa db"
+    print("@ add node")
+
+def inputConfiguration(command):
+    "Convert configuration to bytes for saving in the database"               
+    command = bytearray(command, 'utf-8')
+    print(hex(command[0]))
+    print(command)
+    # for segment in command:
+    #     print('{0:02x}'.format(segment))
+    #     print(type(segment))
 
 # insert to database
-	# send data back if there is something there
-	#arduino.write
-	#time.sleep
+    # send data back if there is something there
+    #arduino.write
+    #time.sleep
 
 #main program
+choice = 0
+while choice != 3:
+    print('*************************')
+    # print('Command line control')
+    print('Choose the corresponding number for command: ')
+    print('1. Read WSAN data')
+    print('2. Send WSAN config')
+    print('3. Exit')
+    print('*************************')
+    choice = input('Enter choice: ')
 
-print('Command line control')
-print('1. Read WSAN data')
-print('2. Send WSAN config')
-print('3. Exit')
-choice = input('Enter your command: ')
-
-if choice == '1':
-	readSerial()
-elif choice == '2':
-	print('derp')
-	#write serial
-elif choice == '3':
-	exit()
+    if choice == '1':
+        readSerial()
+    elif choice == '2':
+        
+        # # connectDatabase()
+        # np.set_printoptions(formatter={'int': hex})
+        # testPacket = [255, 0, 1, 3, 0, 255, 0, 1, 90, 254]
+        # x = np.array(testPacket)
+        # # x = ("0x" + ("{:0>2x}" * len(x))).format(*tuple(x))
+        # x = (("{:0>2x}" * len(x))).format(*tuple(x))
+        # #convert to hex string
+        # packetQueue.append(x)
+        
+        # insertPortData(parsePacket()) # testing
+        #write serial
+        command = input('Enter packet to send: ')
+        inputConfiguration(command)
+    elif choice == '3':
+        exit()
 
