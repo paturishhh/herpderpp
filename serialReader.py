@@ -1,5 +1,5 @@
 import collections, binascii, time, MySQLdb
-import serial, codecs
+import serial, datetime
 from array import array
 
 QUEUE_SIZE = 3;
@@ -118,17 +118,45 @@ def insertCommand(packetDetails):
     database = MySQLdb.connect(host="localhost", user ="root", passwd = "root", db ="thesis")
     cur = database.cursor()
     sql = "SELECT * FROM node WHERE node_id = '%d'" % nodeAddr
-    print(cur.rowcount)
-    if cur.rowcount == -1 : #new node
-        addNode()
-        database.close()
-    else:
-        print("proceed with life")
-        database.close()
 
-def addNode():
-    "add a new node in case wala pa sa db"
+    try:
+        cur.execute(sql)
+        result = cur.fetchone()
+        
+        if cur.rowcount == 0: #new node
+            addNode(nodeAddr)
+        else:
+            print("proceed with life")
+
+        # sql = "INSERT INTO port value(node_id, port_value, time_stamp) VALUES ('%d', '%d', '%s')" % (nodeAddr, portValue, timeStamp)
+        curr_time = time.localtime()
+        # print(curr_time)
+        commandCode = packetDetails[1]
+        # print(commandCode)
+        timeStamp = time.strftime('%Y-%m-%d %H:%M:%S', curr_time)
+        # print(timeStamp)
+        sql = "INSERT INTO command(node_id, command_code, time_stamp) VALUES ('%d', '%d', '%s')" % (nodeAddr, commandCode, timeStamp)
+        cur.execute(sql)
+        database.commit()
+        database.close()
+    except:
+        database.rollback()
+        print("error desu")
+
+def addNode(nodeAddr):
+    "add a new node when a new node is detected"
     print("@ add node")
+    database = MySQLdb.connect(host="localhost", user ="root", passwd = "root", db ="thesis")
+    cur = database.cursor()
+    sql = "INSERT INTO node(node_address_physical, node_address_logical,node_active) VALUES ('%d', '%d', '%d')" % (nodeAddr, 0, 1)
+
+    try:
+        cur.execute(sql)
+        database.commit()
+    except:
+        print("error")
+        database.rollback()
+    database.close()
 
 def inputConfiguration(command):
     "Convert configuration to bytes for saving in the database"               
