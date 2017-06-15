@@ -110,7 +110,7 @@ const char errorMessage2[] PROGMEM = "Cannot access SD Card";
 const char infoMessage0[] PROGMEM = "Range Mode";
 const char infoMessage1[] PROGMEM = "Threshold Mode";
 const char infoMessage2[] PROGMEM = "Keep Alive Message Requested";
-const char infoMessage3[] PROGMEM = "Reset Segment Counter";
+const char infoMessage3[] PROGMEM = "All read";
 const char infoMessage4[] PROGMEM = "Getting Next Command";
 const char infoMessage5[] PROGMEM = "All Commands Served";
 const char infoMessage6[] PROGMEM = "Port Details: ";
@@ -466,7 +466,7 @@ void loadConfig() { //loads config file and applies it to the registers
       // last value of portOverflowCount array is for timeout
       xbee.print("@ "); // to print entire packet later
       initializePacket(packetQueue[packetQueueTail]);
-      formatReplyPacket(packetQueue[packetQueueTail], 0x0D);
+      formatReplyPacket(packetQueue[packetQueueTail], 0x11);
       closePacket(packetQueue[packetQueueTail]);
       //      printQueue(packetQueue, PACKET_QUEUE_SIZE);
       xbee.println("Request");
@@ -606,17 +606,14 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
         servo2.write(actuatorValue);
         portValue[index] = servo2.read();
       }
-      else if(index == 0x09){ // A3 - 17 >>>  9 
-        servo3.write(actuatorValue);
-        portValue[index] = servo3.read();
+      else if(index == 0x09){ // A3 - 17 >>>  9
+        portValue[index] = digitalRead(17);
       }
       else if(index == 0x0A){ // A4 - 18 >>> A
-        servo4.write(actuatorValue);
-        portValue[index] = servo4.read();
+        portValue[index] = digitalRead(18);
       }
       else if(index == 0x0B){ // A5 - 19 >>>  B
-        servo5.write(actuatorValue);
-        portValue[index] = servo5.read();
+        portValue[index] = digitalRead(19);
       }
 
       xbee.print("Index: ");
@@ -626,21 +623,37 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     }
   }
   else { //sensor
-    xbee.println("Sensor @ manip!");
+//    xbee.println("Sensor @ manip!");
     if (index < 0x06) { //Digital sensor
       portValue[index] = digitalRead(index + 0x04);
     }
     else if (index >= 0x06) { // analog sensor
-      int portVal = analogRead((index + 0x08)); //reads the value
-      portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
-//      xbee.print("Read");
-//      xbee.println(portValue[index]);
+      int portVal;
       
+      if(index == 0x06){
+        portValue[index] = servo0.read(); //0 - 180 degrees
+      }
+      else if(index == 0x07){
+        portValue[index] = servo1.read(); //0 - 180 degrees
+      }
+      else if(index == 0x08){
+         portValue[index] = servo2.read(); //0 - 180 degrees
+      }
+      else if(index == 0x09){
+        portVal = analogRead(A3);
+        portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+      }
+      else if(index == 0x0A){
+        portVal = analogRead(A4);
+        portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+      }
+      else if(index == 0x0B){
+        portVal = analogRead(A5);
+        portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+      }
     }
   }
   portDataChanged |= (1 << index); //set port data changed
-//  xbee.print("data change: ");
-//  xbee.println(portDataChanged,HEX);
 }
 
 void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
@@ -899,8 +912,8 @@ void checkOtherCommands() { // checks if there is still commands
   }
   else {
     segmentCounter = 0xFF; // go to footer
-    strcpy_P(buffer, (char*)pgm_read_word(&(messages[18])));
-    xbee.println(buffer);
+//    strcpy_P(buffer, (char*)pgm_read_word(&(messages[18])));
+//    xbee.println(buffer);
   }
 }
 
@@ -971,12 +984,18 @@ void retrieveSerialQueue(byte queue[], byte head) { // read from queue and store
     else if (segmentCounter == 0x06) { // PORT CONFIGURATION SEGMENT
       //        strcpy_P(buffer, (char*)pgm_read_word(&(messages[0])));
       //        xbee.println(buffer);
+      xbee.print("Port config: ");
+      xbee.println(data, HEX);
       portNum = 0xF0 & data; // to get port number; @ upper byte
       portNum = portNum >> 4; // move it to the right
+//      xbee.print("Port NUM: ");
+//      xbee.println(portNum, HEX);
       configChangeRegister |= (1 << portNum); // to inform which ports was changed
       
       setPortConfigSegment(portNum, data); // stored to port config segment
       tempModeStorage = data & 0x07; // stores the modes sent; @ lower byte
+//      xbee.print("tempModeStorage: ");
+//      xbee.println(tempModeStorage, HEX);
 
       checkPortModesSent(); // checks modes sent serving timer > event > odm
     }
@@ -1523,7 +1542,7 @@ void checkTimeout() {
   if (requestConfig == true  && attemptIsSet) { //trying to request config and it has not yet come
     if (attemptCounter <= MAX_ATTEMPT) { // requests again
       initializePacket(packetQueue[packetQueueTail]);
-      formatReplyPacket(packetQueue[packetQueueTail], 0x0D); // request config
+      formatReplyPacket(packetQueue[packetQueueTail], 0x11); // request config
       closePacket(packetQueue[packetQueueTail]);
       //      printQueue(packetQueue, PACKET_QUEUE_SIZE);
       attemptIsSet = false;
@@ -1621,12 +1640,12 @@ void initializeTimer() {
 
 void setup() {
   //attaching the pin to
-  servo0.attach(14);
-  servo1.attach(15);
-  servo2.attach(16);
-  servo3.attach(17);
-  servo4.attach(18);
-  servo5.attach(19);
+  servo0.attach(14); // A0
+  servo1.attach(15); // A1
+  servo2.attach(16); // A2
+//  servo3.attach(17);
+//  servo4.attach(18);
+//  servo5.attach(19);
   
   //initiallize startup pins
   pinMode(SUCCESS_LED_PIN, OUTPUT);
@@ -1847,7 +1866,7 @@ void loop() {
 //        xbee.println(errorFlag, HEX);
         if((errorFlag & 0x01) == 0x01){
 //          xbee.println("No SD");
-          formatReplyPacket(packetQueue[packetQueueTail], 0x0A);
+          formatReplyPacket(packetQueue[packetQueueTail], 0x10);
           errorFlag = errorFlag & 0xFE; //turn off error
         }
         else if((errorFlag & 0x02) == 0x02){
@@ -1888,8 +1907,8 @@ void loop() {
               manipulatePortData(x,0x00); //timer write / read
               timerGrant = timerGrant & ~(1<<x); // clear timer grant of bit
               timerRequest = timerRequest | (1 << x); //request again
-              xbee.println(timerGrant, HEX);
-              xbee.println(timerRequest, HEX);
+//              xbee.println(timerGrant, HEX);
+//              xbee.println(timerRequest, HEX);
             }
           }
 //        xbee.print("End loop timerGrant: ");
