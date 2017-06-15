@@ -570,7 +570,13 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     else if (configType == 0x02) { //odm
       actuatorValue = actuatorValueOnDemandSegment[index];
     }
+    else if (configType == 0x03){ //just probing
+      actuatorValue = 0;
+    }
+    
     actuatorValue = actuatorValue & 0x0FFF; // get only details
+    xbee.print("wr");
+    xbee.println(actuatorValue);
 //    xbee.print("actuatorValue: ");
 //    xbee.println(actuatorValue, HEX);
 //    xbee.print("index: ");
@@ -580,7 +586,7 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
       if (actuatorValue == 0x00) {
         digitalWrite(index + 0x04, LOW); //port 0 is at pin 4
       }
-      else if (actuatorValue == 0x01) {
+      else if (actuatorValue > 0x00) {
         digitalWrite(index + 0x04, HIGH);
       }
       portValue[index] = digitalRead(index + 0x04);
@@ -641,7 +647,10 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
       }
       else if(index == 0x09){
         portVal = analogRead(A3);
+        xbee.print("...");
+        xbee.println(portVal);
         portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+        xbee.println(portValue[index]);
       }
       else if(index == 0x0A){
         portVal = analogRead(A4);
@@ -653,7 +662,9 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
       }
     }
   }
-  portDataChanged |= (1 << index); //set port data changed
+  if(configType != 0x03){
+    portDataChanged |= (1 << index); //set port data changed
+  }
 }
 
 void convertEventDetailsToDecimal(byte portNum) { // from bcd to decimal
@@ -1938,18 +1949,9 @@ void loop() {
             eventType = ((eventSegment[x] & 0xF000) >> 12); //getting event values
             
             //read port value
-            if (x < 0x06) { //digital sensor
-              tempPortValue = digitalRead((x + 0x04)); //check digital pin
-            }
-            else if (x >= 0x06) { //analog sensor
-                tempPortValue = analogRead((x + 0x08)); //check analog pin
-                tempPortValue = constrain(tempPortValue, 0, 999); //scale it to 999 (max in bcd)
-//              xbee.print("tempPortVal");
-//              xbee.println(tempPortValue);
-            }
+            manipulatePortData(x, 0x03);
             
-            conditionReached = checkEventCondition(eventCondition, tempPortValue, eventValue);
- 
+            conditionReached = checkEventCondition(eventCondition, portValue[x], eventValue);
   
             if ((eventType & 0x80) == 0x80) { //check if range mode
               xbee.println("Range!");
