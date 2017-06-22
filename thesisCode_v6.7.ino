@@ -575,8 +575,8 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     }
     
     actuatorValue = actuatorValue & 0x0FFF; // get only details
-    xbee.print("wr");
-    xbee.println(actuatorValue);
+//    xbee.print("wr");
+//    xbee.println(actuatorValue);
 //    xbee.print("actuatorValue: ");
 //    xbee.println(actuatorValue, HEX);
 //    xbee.print("index: ");
@@ -635,6 +635,8 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
     }
     else if (index >= 0x06) { // analog sensor
       int portVal;
+      long maxx = 999;
+      long diver = 1023;
       
       if(index == 0x06){
         portValue[index] = servo0.read(); //0 - 180 degrees
@@ -649,16 +651,17 @@ void manipulatePortData(byte index, byte configType) { //checks port type, actua
         portVal = analogRead(A3);
         xbee.print("...");
         xbee.println(portVal);
-        portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+//        portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+        portValue[index] = (portVal * maxx) / diver;
         xbee.println(portValue[index]);
       }
       else if(index == 0x0A){
         portVal = analogRead(A4);
-        portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+        portValue[index] = (portVal * maxx) / diver;
       }
       else if(index == 0x0B){
         portVal = analogRead(A5);
-        portValue[index] = constrain(portVal, 0, 999); //constrains values para within 0-999 (ng bcd)
+        portValue[index] = (portVal * maxx) / diver;
       }
     }
   }
@@ -1661,6 +1664,8 @@ void setup() {
   //initiallize startup pins
   pinMode(SUCCESS_LED_PIN, OUTPUT);
   pinMode(ERROR_LED_PIN, OUTPUT);
+
+  Serial.begin(9600);
   
   //initialize port pins
   pinMode(4, OUTPUT);
